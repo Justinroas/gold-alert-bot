@@ -1,0 +1,42 @@
+name: Gold alert
+
+on:
+  schedule:
+    # Every 30 min, 2 min after each candle closes. Covers 7-10am New York time in
+    # both summer (EDT) and winter (EST); the script itself enforces 7-10am NY.
+    - cron: "2,32 11-15 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      force_message:
+        description: "Send a test message even if there is no breakout"
+        type: boolean
+        default: true
+
+concurrency: gold-alert
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Remember last alert (avoids double alerts)
+        uses: actions/cache/restore@v4
+        with:
+          path: .state
+          key: gold-state-${{ github.run_id }}
+          restore-keys: gold-state-
+      - run: python alert.py
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TWELVEDATA_API_KEY: ${{ secrets.TWELVEDATA_API_KEY }}
+          FORCE_MESSAGE: ${{ inputs.force_message }}
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: .state
+          key: gold-state-${{ github.run_id }}
