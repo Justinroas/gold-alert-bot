@@ -129,6 +129,38 @@ def _spot_bars(api_key, interval="30min"):
                  close=float(v["close"]), volume=0.0) for v in reversed(data["values"])]
 
 
+def get_bars_history():
+    """As much 30-min history as the free sources give (about 60 days, limited by futures volume)."""
+    import yfinance as yf
+    df = yf.download(TICKER, period="60d", interval="30m", auto_adjust=False, progress=False)
+    df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
+    fut = [dict(start=ts.to_pydatetime(), open=float(r.Open), high=float(r.High), low=float(r.Low),
+                close=float(r.Close), volume=float(r.Volume)) for ts, r in df.dropna().iterrows()]
+    key = os.environ.get("TWELVEDATA_API_KEY")
+    if not key:
+        return fut
+    r = requests.get("https://api.twelvedata.com/time_series",
+                     params=dict(symbol="XAU/USD", interval="30min", outputsize=5000,
+                                 timezone="UTC", apikey=key), timeout=60)
+    r.raise_for_status()
+    data = r.json()
+    if "values" not in data:
+        raise RuntimeError(f"Twelve Data error: {data}")
+    utc = ZoneInfo("UTC")
+    vol = {b["start"]: b["volume"] for b in fut}
+    spot = [dict(start=datetime.fromisoformat(v["datetime"]).replace(tzinfo=utc),
+                 open=float(v["open"]), high=float(v["high"]), low=float(v["low"]),
+                 close=float(v["close"])) for v in reversed(data["values"])]
+    first = fut[0]["start"] if fut else None
+    out = []
+    for b in spot:
+        if first and b["start"] < first:
+            continue
+        b["volume"] = vol.get(b["start"], 0.0)
+        out.append(b)
+    return out
+
+
 def get_bars_5min():
     key = os.environ.get("TWELVEDATA_API_KEY")
     return _spot_bars(key, "5min") if key else _yahoo_bars(TICKER, "5min")
