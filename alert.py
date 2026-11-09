@@ -136,7 +136,7 @@ def main():
     elif os.environ.get("FORCE_MESSAGE", "").lower() == "true":
         last = bars[-1] if bars else None
         msg = "ℹ️ Gold bot test: connected and working. No breakout right now." + (
-            f"\nLatest gold price: ${last['close']:,.2f}" if last else "")
+            f"\nLatest {'XAU/USD' if os.environ.get('TWELVEDATA_API_KEY') else 'gold futures'} price: ${last['close']:,.2f}" if last else "")
     else:
         print("No breakout this candle.")
         return
