@@ -2,9 +2,10 @@ name: Gold alert
 
 on:
   schedule:
-    # Every 30 min, 2 min after each candle closes. Covers 7-10am New York time in
-    # both summer (EDT) and winter (EST); the script itself enforces 7-10am NY.
-    - cron: "2,32 11-15 * * 1-5"
+    # Every 5 min: catches each 30-min candle close (2 min after) and watches for
+    # entry triggers. Covers 7-10am New York in both EDT and EST; the script itself
+    # enforces the 7-10am NY window for new breakouts.
+    - cron: "2-59/5 11-15 * * 1-5"
   workflow_dispatch:
     inputs:
       force_message:
