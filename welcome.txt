@@ -1,0 +1,18 @@
+👋 Welcome to Gold Alerts!
+
+This group gets automatic alerts on gold (XAU/USD) using our 30-minute breakout strategy. The bot does NOT trade for you. It just tells you when to look at the chart.
+
+⏰ When: weekdays, 7 to 10am New York time
+
+📈 What the bot looks for:
+1. Gold moving sideways in a tight range on the 30-min chart
+2. A 30-min candle CLOSING above resistance or below support
+3. A strong move: a big candle or high volume
+
+🔔 Alerts you'll see:
+🟢/🔴 BREAKOUT: a setup just formed. It shows the range and the entry price.
+🚀/🔻 ENTRY TRIGGERED: price just broke the entry level. Check your chart now.
+
+Expect about one setup a morning. Some days there are none.
+
+⚠️ Always use your own stop loss and judgment. Alerts are not financial advice.
