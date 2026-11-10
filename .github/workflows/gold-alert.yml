@@ -11,7 +11,7 @@ on:
       force_message:
         description: "Send a test message even if there is no breakout"
         type: boolean
-        default: true
+        default: false
 
 concurrency: gold-alert
 
