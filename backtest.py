@@ -48,6 +48,9 @@ def main():
             out.append(f"| {tight}x{mark} | {imp}x | {len(al)} | {len(al) / max(weekdays, 1) * 5:.1f} | "
                        f"{sum(a['entered'] for a in al)} |")
     al = replay(bars, 2.5, 1.5)
+    morning = [a for a in al if a["at"].hour < 10 or (a["at"].hour == 10 and a["at"].minute == 0)]
+    out += ["", f"Of the {len(al)} alerts with current settings, {len(morning)} were 7-10am and "
+            f"{len(al) - len(morning)} were after 10am.", ""]
     out += ["", "### Every alert with the current settings", "",
             "| Time (NY) | Side | Entry | Entry hit? | Best move in 2h | Worst move in 2h |",
             "|---|---|---|---|---|---|"]

@@ -7,7 +7,7 @@ Rules:
 2. Breakout: the latest finished candle CLOSES above resistance (BUY) or below support (SELL).
 3. Impulsive: that candle is big (>= IMPULSE_MULT x average size) or has high volume
    (>= IMPULSE_MULT x average volume).
-4. Only for candles that close between 7:00 and 10:00 New York time.
+4. Only for candles that close between 7:00am and 4:00pm New York time.
 5. Entry trigger: after a breakout alert, every 5-minute check watches for price to break
    the breakout candle's high (BUY) or low (SELL) and sends an "ENTRY TRIGGERED" alert.
    This watch expires after ENTRY_WINDOW_MIN minutes.
@@ -26,7 +26,8 @@ BOX_BARS = int(os.environ.get("BOX_BARS", "6"))        # 6 candles = 3 hours
 AVG_BARS = int(os.environ.get("AVG_BARS", "20"))
 TIGHT_MULT = float(os.environ.get("TIGHT_MULT", "2.5"))
 IMPULSE_MULT = float(os.environ.get("IMPULSE_MULT", "1.5"))
-START, END = time(7, 0), time(10, 0)
+START = time(int(os.environ.get("START_HOUR", "7")), 0)
+END = time(int(os.environ.get("END_HOUR", "16")), 0)
 STATE_FILE = ".state/state.json"
 ENTRY_WINDOW = timedelta(minutes=int(os.environ.get("ENTRY_WINDOW_MIN", "60")))
 

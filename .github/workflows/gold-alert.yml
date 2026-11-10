@@ -2,10 +2,10 @@ name: Gold alert
 
 on:
   schedule:
-    # Every 5 min: catches each 30-min candle close (2 min after) and watches for
-    # entry triggers. Covers 7-10am New York in both EDT and EST; the script itself
-    # enforces the 7-10am NY window for new breakouts.
-    - cron: "2-59/5 11-15 * * 1-5"
+    # Every 10 min (2 min after each 30-min candle close, plus entry-trigger checks
+    # in between). Covers 7am-4pm New York in both EDT and EST; the script itself
+    # enforces the window. Every 10 min keeps this inside GitHub's free minutes.
+    - cron: "2-59/10 11-21 * * 1-5"
   workflow_dispatch:
     inputs:
       force_message:

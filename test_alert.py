@@ -31,7 +31,7 @@ def test_weak_break_ignored():
     assert alert.check(bars, now) is None
 
 def test_outside_hours_ignored():
-    bars, now = make(2012, 2013, 2003, last_close_ny=(11, 0))
+    bars, now = make(2012, 2013, 2003, last_close_ny=(16, 30))
     assert alert.check(bars, now) is None
 
 def test_no_consolidation_ignored():
