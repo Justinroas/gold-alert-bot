@@ -4,7 +4,7 @@ Built from Raja Banks' public material and screenshots of trades he took. Two se
 both around key levels:
 
 Key levels for today (each only used once it is complete):
-  yesterday's high/low, Asia high/low (6pm-3am NY, usable from 3am),
+  yesterday's high/low (from 6pm), Asia high/low (6pm-3am NY, usable from 3am),
   London high/low (3am-7am NY, usable from 7am).
 
 Setup A, break & retest: a 15-min candle closes strongly through a high (BUY) or low (SELL),
@@ -15,8 +15,12 @@ Setup B, rejection: price pokes into a high (or low) but the candle closes back 
   (above) it with a long wick, and the next candle confirms by closing beyond the rejection candle's
   low (high). Entry = the confirming close. (From Raja's 4,127 ceiling sell, Nov 10.)
 
+Setup C, range breakout (Raja's video, Nov 4): after a big move, candles print side by
+  side in a tight range ("CFR, clean range" behind it). Wait for a candle to break and CLOSE
+  outside the range, then go with it. Entry = that close.
+
 Stop loss: just past the setup's extreme, capped at MAX_STOP pips.
-Take profit: TP1 / TP2 pips (1 pip = $0.10 on gold). Session: START to END, New York time.
+Take profit: TP1 / TP2 pips (1 pip = $0.10 on gold). Session: 6pm (Asia open) to noon New York time.
 """
 import os
 from datetime import timedelta, time
@@ -34,7 +38,11 @@ TOUCH = 10 * PIP
 BODY_MIN = 0.5
 WICK_MIN = 0.4   # rejection candle: the wick into the level is at least 40% of the candle
 RETEST_BARS = 4
-START = time(int(os.environ.get("RAJA_START_HOUR", "3")), 0)
+BOX_BARS = 6          # range setup: 6 candles (1.5h) side by side
+IMPULSE_BARS = 8      # the 2 hours before the range
+IMPULSE_MULT = 2.0    # the move before the range is at least 2x the range height
+MAX_RANGE = 200 * PIP # Raja's example range was 170 pips
+START = time(int(os.environ.get("RAJA_START_HOUR", "18")), 0)   # 6pm: Asia session opens
 END = time(int(os.environ.get("RAJA_END_HOUR", "12")), 0)
 
 
@@ -59,7 +67,7 @@ def key_levels(bars, day):
     asia = [b for b in today if _ny(b["start"]) >= time(18) or _ny(b["start"]) < time(3)]
     london = [b for b in today if time(3) <= _ny(b["start"]) < time(7)]
     out = []
-    for name, group, usable in (("yesterday's", prev, time(0)), ("Asia", asia, time(3)),
+    for name, group, usable in (("yesterday's", prev, time(18)), ("Asia", asia, time(3)),
                                 ("London", london, time(7))):
         hi, lo = _hl(group)
         if hi is not None:
@@ -68,9 +76,13 @@ def key_levels(bars, day):
     return out
 
 
+def _mins(t):
+    """Minutes since 6pm NY (the start of gold's trading day), so overnight times sort correctly."""
+    return ((t.hour - 18) % 24) * 60 + t.minute
+
+
 def _in_session(b):
-    t = _ny(b["start"] + BAR)
-    return START < t <= END
+    return _mins(START) < _mins(_ny(b["start"] + BAR)) <= _mins(END)
 
 
 def _make(side, entry, extreme, at, levels, setup, detail):
@@ -99,6 +111,8 @@ def find_entries(bars, now):
         k = (e["at"], e["side"])
         if k in entries:
             entries[k]["levels"] += e["levels"]
+            if e["setup"] not in entries[k]["setup"]:
+                entries[k]["setup"] += " + " + e["setup"]
         else:
             entries[k] = e
 
@@ -106,13 +120,13 @@ def find_entries(bars, now):
         b, prev = today[i], today[i - 1]
         if not _in_session(b):
             continue
-        t = _ny(b["start"])
+        t = _mins(_ny(b["start"]))
         rng = b["high"] - b["low"]
         if rng <= 0:
             continue
         strong = abs(b["close"] - b["open"]) >= BODY_MIN * rng
         for name, lvl, usable in levels:
-            if name in used or t < usable:
+            if name in used or t < _mins(usable):
                 continue
             is_high = name.endswith("high")
             # Setup A: break & retest
@@ -152,6 +166,24 @@ def find_entries(bars, now):
                 add(_make("BUY", c["close"], min(b["low"], c["low"]), at, [(name, lvl)], "Rejection",
                           f"Price hit the level at {(b['start'] + BAR).astimezone(NY):%-I:%M %p}, "
                           f"got pushed back up, and the next candle confirmed."), name)
+        # Setup C: tight range after a big move ("clean range"), break and close out of it
+        if i >= BOX_BARS + IMPULSE_BARS and strong:
+            box = today[i - BOX_BARS:i]
+            top, bottom = max(x["high"] for x in box), min(x["low"] for x in box)
+            height = top - bottom
+            before = today[i - BOX_BARS - IMPULSE_BARS:i - BOX_BARS]
+            move = abs(before[-1]["close"] - before[0]["open"])
+            key = f"range {box[0]['start']:%H:%M}"
+            if 0 < height <= MAX_RANGE and move >= IMPULSE_MULT * height and key not in used:
+                side = "BUY" if b["close"] > top else "SELL" if b["close"] < bottom else None
+                if side:
+                    at = (b["start"] + BAR).astimezone(NY)
+                    used.add(key)
+                    lvl = top if side == "BUY" else bottom
+                    add(_make(side, b["close"], b["low"] if side == "BUY" else b["high"], at,
+                              [("range " + ("top" if side == "BUY" else "bottom"), lvl)], "Range breakout",
+                              f"After a big move, price went sideways in a {height / PIP:.0f}-pip range, "
+                              f"then a candle closed {'above' if side == 'BUY' else 'below'} it."), key)
     return [entries[k] for k in sorted(entries, key=lambda k: k[0])]
 
 

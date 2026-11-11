@@ -162,8 +162,19 @@ def test_raja_rejection_sell():
                       (4006.8, 4007, 4002, 4003)])      # next candle closes below its low: confirmed
     now = _dt(2026, 11, 10, 7, 46, tzinfo=_NY)
     es = raja.find_entries(bars, now)
-    sells = [e for e in es if e["side"] == "SELL" and e["setup"] == "Rejection"]
+    sells = [e for e in es if e["side"] == "SELL" and "Rejection" in e["setup"]]
     assert sells and sells[0]["entry"] == 4003
     assert any(n == "yesterday's high" for n, _ in sells[0]["levels"])
     assert abs(sells[0]["stop"] - 4008.0) < 1e-6   # capped at 50 pips from entry
     assert "Rejection" in raja.format_raja(sells[0])
+
+
+def test_raja_range_breakout_after_big_move():
+    move = [(3980 + 3 * k, 3984 + 3 * k, 3979 + 3 * k, 3983 + 3 * k) for k in range(8)]  # +$24 rally
+    box = [(4004, 4006, 4002, 4005)] * 6                                               # $4 range
+    brk = [(4005, 4012, 4004.5, 4011)]                                                 # closes above
+    bars = _raja_day(move + box + brk)
+    now = _dt(2026, 11, 10, 10, 46, tzinfo=_NY)
+    es = [e for e in raja.find_entries(bars, now) if "Range breakout" in e["setup"]]
+    assert es and es[0]["side"] == "BUY" and es[0]["entry"] == 4011
+    assert "Range breakout" in raja.format_raja(es[0])

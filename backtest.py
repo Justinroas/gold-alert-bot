@@ -86,7 +86,7 @@ def raja_replay():
             found.append(e)
     wk = len(days)
     count = lambda r: sum(e["result"] == r for e in found)
-    out = ["", "## Replay: Raja strategy (15-min, 3am-noon NY)", "",
+    out = ["", "## Replay: Raja strategy (15-min, 6pm-noon NY)", "",
            f"{len(found)} entries over {wk} trading days (about {len(found) / max(wk, 1) * 5:.1f} a week).", "",
            f"Hit take profit 2 ({raja.TP2_PIPS} pips): {count('TP2')}, hit TP1 then stopped: {count('TP1 then stop')}, "
            f"TP1 only by day end: {count('TP1')}, stopped out first: {count('SL')}, "
@@ -95,6 +95,11 @@ def raja_replay():
     for e in found:
         out.append(f"| {e['at']:%a %b %d %-I:%M %p} | {e['side']} | {e['setup']} | {', '.join(n for n, _ in e['levels'])} | "
                    f"${e['entry']:,.2f} | ${e['stop']:,.2f} | {e['result']} |")
+    out += ["", "| Setup | Entries | TP2 | TP1 then stop | SL | Unclear |", "|---|---|---|---|---|---|"]
+    for name in ("Break & retest", "Rejection", "Range breakout"):
+        g = [e for e in found if e["setup"].startswith(name)]
+        c = lambda r: sum(e["result"] == r for e in g)
+        out.append(f"| {name} | {len(g)} | {c('TP2')} | {c('TP1 then stop')} | {c('SL')} | {c('unclear')} |")
     return out
 
 
