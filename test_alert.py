@@ -126,7 +126,8 @@ def _raja_day(break_bars):
     return bars
 
 
-def test_raja_buy_break_and_retest():
+def test_raja_buy_break_and_retest(monkeypatch):
+    monkeypatch.setattr(raja, "BREAK_RETEST", True)
     bars = _raja_day([(4005, 4007, 4004, 4006),       # 7:00 quiet
                       (4006, 4014, 4006, 4013),       # 7:15 breaks yesterday's high 4010
                       (4013, 4013.5, 4010.5, 4012)])  # 7:30 retests 4010 and holds

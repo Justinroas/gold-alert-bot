@@ -38,6 +38,7 @@ TOUCH = 10 * PIP
 BODY_MIN = 0.5
 WICK_MIN = 0.4   # rejection candle: the wick into the level is at least 40% of the candle
 RETEST_BARS = 4
+BREAK_RETEST = os.environ.get("RAJA_BREAK_RETEST", "off") == "on"
 BOX_BARS = 6          # range setup: 6 candles (1.5h) side by side
 IMPULSE_BARS = 8      # the 2 hours before the range
 IMPULSE_MULT = 2.0    # the move before the range is at least 2x the range height
@@ -135,6 +136,8 @@ def find_entries(bars, now):
                 side = "BUY"
             elif strong and not is_high and b["close"] < lvl < prev["close"] and b["close"] < b["open"]:
                 side = "SELL"
+            if side and not BREAK_RETEST:
+                side = None  # setup A switched off: it lost more than it won in the replay
             if side:
                 for r in today[i + 1:i + 1 + RETEST_BARS]:
                     if (side == "BUY" and r["close"] <= lvl) or (side == "SELL" and r["close"] >= lvl):
