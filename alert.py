@@ -22,7 +22,7 @@ import requests
 import raja
 
 NY = ZoneInfo("America/New_York")
-STRATEGY = "📘 Strategy: Giovanni's 30-min breakout"
+STRATEGY = "📘 Strategy: 30-minute breakout"
 TICKER = os.environ.get("TICKER", "GC=F")  # gold futures: used for volume (spot XAU/USD has none)
 BAR = timedelta(minutes=30)
 BOX_BARS = int(os.environ.get("BOX_BARS", "6"))        # 6 candles = 3 hours

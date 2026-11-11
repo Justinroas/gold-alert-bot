@@ -18,7 +18,7 @@ from datetime import timedelta, time
 from zoneinfo import ZoneInfo
 
 NY = ZoneInfo("America/New_York")
-STRATEGY = "📗 Strategy: Raja Banks break & retest (15-min)"
+STRATEGY = "📗 Strategy: Raja strategy"
 BAR = timedelta(minutes=15)
 PIP = 0.10
 TP1_PIPS = int(os.environ.get("RAJA_TP1_PIPS", "35"))

@@ -138,7 +138,7 @@ def test_raja_buy_break_and_retest():
     assert any(n == "yesterday's high" for n, _ in e["levels"])
     assert abs(e["tp1"] - 4015.5) < 1e-6 and abs(e["tp2"] - 4017) < 1e-6
     assert abs(e["stop"] - 4010.0) < 1e-6  # retest low 4010.5 minus $0.50
-    assert "Raja Banks" in raja.format_raja(e) and "Stop loss" in raja.format_raja(e)
+    assert "Raja strategy" in raja.format_raja(e) and "Stop loss" in raja.format_raja(e)
 
 
 def test_raja_failed_break_no_entry():
