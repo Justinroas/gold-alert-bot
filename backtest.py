@@ -76,25 +76,24 @@ def raja_replay():
     found = []
     for d in days:
         from datetime import datetime, time
-        cutoff = datetime.combine(d, time(12, 0), tzinfo=raja.NY)
+        cutoff = datetime.combine(d, time(13, 0), tzinfo=raja.NY)
         upto = [b for b in bars if b["start"] < cutoff]
         if not upto or raja.trading_day(upto[-1]["start"]) != d:
             continue
-        later = [b for b in bars if b["start"] >= cutoff - timedelta(hours=5)
-                 and raja.trading_day(b["start"]) == d]
+        later = [b for b in bars if raja.trading_day(b["start"]) == d]
         for e in raja.find_entries(upto, cutoff):
             e["result"] = raja.outcome(e, later)
             found.append(e)
     wk = len(days)
     count = lambda r: sum(e["result"] == r for e in found)
-    out = ["", "## Replay: Raja Banks break & retest (15-min, 7-11am NY)", "",
+    out = ["", "## Replay: Raja strategy (15-min, 3am-noon NY)", "",
            f"{len(found)} entries over {wk} trading days (about {len(found) / max(wk, 1) * 5:.1f} a week).", "",
-           f"Hit take profit 2 (50 pips): {count('TP2')}, hit TP1 then stopped: {count('TP1 then stop')}, "
+           f"Hit take profit 2 ({raja.TP2_PIPS} pips): {count('TP2')}, hit TP1 then stopped: {count('TP1 then stop')}, "
            f"TP1 only by day end: {count('TP1')}, stopped out first: {count('SL')}, "
            f"stop and target in the same 15-min candle (can't tell): {count('unclear')}, neither by day end: {count('open')}.", "",
-           "| Time (NY) | Side | Levels | Entry | Stop | Result |", "|---|---|---|---|---|---|"]
+           "| Time (NY) | Side | Setup | Levels | Entry | Stop | Result |", "|---|---|---|---|---|---|---|"]
     for e in found:
-        out.append(f"| {e['at']:%a %b %d %-I:%M %p} | {e['side']} | {', '.join(n for n, _ in e['levels'])} | "
+        out.append(f"| {e['at']:%a %b %d %-I:%M %p} | {e['side']} | {e['setup']} | {', '.join(n for n, _ in e['levels'])} | "
                    f"${e['entry']:,.2f} | ${e['stop']:,.2f} | {e['result']} |")
     return out
 

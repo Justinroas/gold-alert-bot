@@ -136,7 +136,7 @@ def test_raja_buy_break_and_retest():
     e = es[0]
     assert e["side"] == "BUY" and e["entry"] == 4012
     assert any(n == "yesterday's high" for n, _ in e["levels"])
-    assert abs(e["tp1"] - 4015.5) < 1e-6 and abs(e["tp2"] - 4017) < 1e-6
+    assert abs(e["tp1"] - 4015.5) < 1e-6 and abs(e["tp2"] - 4017.5) < 1e-6
     assert abs(e["stop"] - 4010.0) < 1e-6  # retest low 4010.5 minus $0.50
     assert "Raja strategy" in raja.format_raja(e) and "Stop loss" in raja.format_raja(e)
 
@@ -150,7 +150,20 @@ def test_raja_failed_break_no_entry():
 
 
 def test_raja_outside_hours():
-    bars = _raja_day([(4005, 4007, 4004, 4006)] * 17 +   # 7:00-11:00 quiet
-                     [(4006, 4014, 4006, 4013), (4013, 4013.5, 4010.5, 4012)])  # 11:15 break
-    now = _dt(2026, 11, 10, 11, 50, tzinfo=_NY)
+    bars = _raja_day([(4005, 4007, 4004, 4006)] * 21 +   # 7:00-12:00 quiet
+                     [(4006, 4014, 4006, 4013), (4013, 4013.5, 4010.5, 4012)])  # 12:15 break
+    now = _dt(2026, 11, 10, 12, 50, tzinfo=_NY)
     assert raja.find_entries(bars, now) == []
+
+
+def test_raja_rejection_sell():
+    bars = _raja_day([(4005, 4007, 4004, 4006),
+                      (4007, 4010.5, 4006.5, 4006.8),   # pokes yesterday's high 4010, closes back below
+                      (4006.8, 4007, 4002, 4003)])      # next candle closes below its low: confirmed
+    now = _dt(2026, 11, 10, 7, 46, tzinfo=_NY)
+    es = raja.find_entries(bars, now)
+    sells = [e for e in es if e["side"] == "SELL" and e["setup"] == "Rejection"]
+    assert sells and sells[0]["entry"] == 4003
+    assert any(n == "yesterday's high" for n, _ in sells[0]["levels"])
+    assert abs(sells[0]["stop"] - 4008.0) < 1e-6   # capped at 50 pips from entry
+    assert "Rejection" in raja.format_raja(sells[0])
