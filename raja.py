@@ -3,7 +3,7 @@
 Rules (as we understood them; tweak the settings below):
 1. Key levels for today: previous day high/low, Asia session high/low (6pm-3am NY),
    London session high/low (3am-7am NY).
-2. Break: a finished 15-min candle closes through a level with a strong body
+2. Break: a finished 15-min candle closes above a high (BUY) or below a low (SELL) with a strong body
    (body >= BODY_MIN of the candle, in the breakout direction), and the candle before
    it closed on the other side of the level.
 3. Retest: within RETEST_BARS candles, price comes back to the level (within TOUCH)
@@ -77,9 +77,10 @@ def find_entries(bars, now):
         for name, lvl in levels:
             if name in used:
                 continue
-            if b["close"] > lvl and b["close"] > b["open"] and prev["close"] <= lvl:
+            is_high = name.endswith("high")
+            if is_high and b["close"] > lvl and b["close"] > b["open"] and prev["close"] <= lvl:
                 side = "BUY"
-            elif b["close"] < lvl and b["close"] < b["open"] and prev["close"] >= lvl:
+            elif not is_high and b["close"] < lvl and b["close"] < b["open"] and prev["close"] >= lvl:
                 side = "SELL"
             else:
                 continue
@@ -127,22 +128,21 @@ def format_raja(e):
 
 
 def outcome(e, later):
-    """What happened after the entry: 'TP2', 'TP1', 'SL' or 'open'. Same-candle ties count as SL."""
+    """What happened after the entry: 'TP2', 'TP1', 'TP1 then stop', 'SL', 'unclear' or 'open'."""
     hit_tp1 = False
     for b in later:
         if b["start"] < e["at"]:
             continue
         lo, hi = b["low"], b["high"]
-        if e["side"] == "BUY":
-            if lo <= e["stop"]:
-                return "TP1 then stop" if hit_tp1 else "SL"
-            if hi >= e["tp2"]:
-                return "TP2"
-            hit_tp1 = hit_tp1 or hi >= e["tp1"]
-        else:
-            if hi >= e["stop"]:
-                return "TP1 then stop" if hit_tp1 else "SL"
-            if lo <= e["tp2"]:
-                return "TP2"
-            hit_tp1 = hit_tp1 or lo <= e["tp1"]
+        buy = e["side"] == "BUY"
+        stopped = lo <= e["stop"] if buy else hi >= e["stop"]
+        tp1 = hi >= e["tp1"] if buy else lo <= e["tp1"]
+        tp2 = hi >= e["tp2"] if buy else lo <= e["tp2"]
+        if stopped and (tp1 and not hit_tp1):
+            return "unclear"  # stop and target in the same candle: can't tell which came first
+        if stopped:
+            return "TP1 then stop" if hit_tp1 else "SL"
+        if tp2:
+            return "TP2"
+        hit_tp1 = hit_tp1 or tp1
     return "TP1" if hit_tp1 else "open"

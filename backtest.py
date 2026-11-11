@@ -90,7 +90,8 @@ def raja_replay():
     out = ["", "## Replay: Raja Banks break & retest (15-min, 7-11am NY)", "",
            f"{len(found)} entries over {wk} trading days (about {len(found) / max(wk, 1) * 5:.1f} a week).", "",
            f"Hit take profit 2 (50 pips): {count('TP2')}, hit TP1 then stopped: {count('TP1 then stop')}, "
-           f"TP1 only by day end: {count('TP1')}, stopped out first: {count('SL')}, neither by day end: {count('open')}.", "",
+           f"TP1 only by day end: {count('TP1')}, stopped out first: {count('SL')}, "
+           f"stop and target in the same 15-min candle (can't tell): {count('unclear')}, neither by day end: {count('open')}.", "",
            "| Time (NY) | Side | Levels | Entry | Stop | Result |", "|---|---|---|---|---|---|"]
     for e in found:
         out.append(f"| {e['at']:%a %b %d %-I:%M %p} | {e['side']} | {', '.join(n for n, _ in e['levels'])} | "
