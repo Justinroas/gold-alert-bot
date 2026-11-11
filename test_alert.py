@@ -96,3 +96,61 @@ def test_main_alerts_once_then_entry(monkeypatch, tmp_path):
     monkeypatch.setattr(alert, "get_bars_5min", lambda: [dict(start=now, high=2020.0, low=2012.0)])
     alert.main(); alert.main()
     assert len(sent) == 2 and "ENTRY TRIGGERED" in sent[1]
+
+
+# ---- Raja Banks break & retest ----
+import raja
+from datetime import datetime as _dt, timedelta as _td
+from zoneinfo import ZoneInfo as _Z
+
+_NY = _Z("America/New_York")
+
+
+def _raja_day(break_bars):
+    """Yesterday's range 4000-4010, Asia 4002-4008, London 4003-4009, then today's NY bars."""
+    bars = []
+    t = _dt(2026, 11, 9, 18, 0, tzinfo=_NY)  # Tue trading day for Mon 6pm onwards = Nov 10
+    # previous trading day (Nov 9 6pm-ish back): bars on Nov 8 18:00..Nov 9 17:00
+    p = _dt(2026, 11, 8, 18, 0, tzinfo=_NY)
+    for i in range(92):
+        bars.append(dict(start=p + _td(minutes=15 * i), open=4005, high=4010 if i == 10 else 4006,
+                         low=4000 if i == 20 else 4004, close=4005, volume=0))
+    for i in range(52):  # 6pm-7am today
+        ts = t + _td(minutes=15 * i)
+        hi = 4008 if ts.astimezone(_NY).hour < 3 or ts.astimezone(_NY).hour >= 18 else 4009
+        bars.append(dict(start=ts, open=4005, high=hi if i in (5, 40) else 4006,
+                         low=4002 if i == 6 else (4003 if i == 41 else 4004), close=4005, volume=0))
+    t7 = _dt(2026, 11, 10, 7, 0, tzinfo=_NY)
+    for i, (o, h, l, c) in enumerate(break_bars):
+        bars.append(dict(start=t7 + _td(minutes=15 * i), open=o, high=h, low=l, close=c, volume=0))
+    return bars
+
+
+def test_raja_buy_break_and_retest():
+    bars = _raja_day([(4005, 4007, 4004, 4006),       # 7:00 quiet
+                      (4006, 4014, 4006, 4013),       # 7:15 breaks yesterday's high 4010
+                      (4013, 4013.5, 4010.5, 4012)])  # 7:30 retests 4010 and holds
+    now = _dt(2026, 11, 10, 7, 46, tzinfo=_NY)
+    es = raja.find_entries(bars, now)
+    assert len(es) == 1
+    e = es[0]
+    assert e["side"] == "BUY" and e["entry"] == 4012
+    assert any(n == "yesterday's high" for n, _ in e["levels"])
+    assert abs(e["tp1"] - 4015.5) < 1e-6 and abs(e["tp2"] - 4017) < 1e-6
+    assert abs(e["stop"] - 4010.0) < 1e-6  # retest low 4010.5 minus $0.50
+    assert "Raja Banks" in raja.format_raja(e) and "Stop loss" in raja.format_raja(e)
+
+
+def test_raja_failed_break_no_entry():
+    bars = _raja_day([(4005, 4007, 4004, 4006),
+                      (4006, 4014, 4006, 4013),       # break
+                      (4013, 4013, 4007, 4007.5)])    # closes back below all levels: failed
+    now = _dt(2026, 11, 10, 7, 46, tzinfo=_NY)
+    assert raja.find_entries(bars, now) == []
+
+
+def test_raja_outside_hours():
+    bars = _raja_day([(4005, 4007, 4004, 4006)] * 17 +   # 7:00-11:00 quiet
+                     [(4006, 4014, 4006, 4013), (4013, 4013.5, 4010.5, 4012)])  # 11:15 break
+    now = _dt(2026, 11, 10, 11, 50, tzinfo=_NY)
+    assert raja.find_entries(bars, now) == []

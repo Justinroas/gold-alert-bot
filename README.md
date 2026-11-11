@@ -32,3 +32,11 @@ Free data can run a few minutes late, and GitHub's timer can also start late, so
 
 ## Tuning
 To change a setting, edit the numbers near the top of `alert.py`: `BOX_BARS` (6 candles), `TIGHT_MULT` (2.5), `IMPULSE_MULT` (1.5).
+
+## Strategy 2: Raja Banks break & retest (15-min)
+
+Every alert starts with the strategy name (📘 Giovanni's 30-min breakout or 📗 Raja Banks).
+Raja alerts (rules in `raja.py`): between 7 and 11am NY, a 15-min candle closes strongly through
+yesterday's high/low, the Asia high/low or the London high/low, then price comes back to that
+level and holds. The alert gives entry, stop loss (just past the retest candle, max 50 pips)
+and take profit 1 / 2 (35 / 50 pips; 1 pip = $0.10 on gold).

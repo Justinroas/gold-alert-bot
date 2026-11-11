@@ -19,6 +19,8 @@ from zoneinfo import ZoneInfo
 
 import requests
 
+import raja
+
 NY = ZoneInfo("America/New_York")
 STRATEGY = "📘 Strategy: Giovanni's 30-min breakout"
 TICKER = os.environ.get("TICKER", "GC=F")  # gold futures: used for volume (spot XAU/USD has none)
@@ -30,6 +32,7 @@ IMPULSE_MULT = float(os.environ.get("IMPULSE_MULT", "1.5"))
 START = time(int(os.environ.get("START_HOUR", "7")), 0)
 END = time(int(os.environ.get("END_HOUR", "16")), 0)
 STATE_FILE = ".state/state.json"
+RAJA_FRESH = timedelta(minutes=30)
 ENTRY_WINDOW = timedelta(minutes=int(os.environ.get("ENTRY_WINDOW_MIN", "60")))
 
 
@@ -107,7 +110,7 @@ def format_entry(pending, price):
             f"Price reached: ${price:,.2f}")
 
 
-YAHOO_INTERVAL = {"30min": "30m", "5min": "5m"}
+YAHOO_INTERVAL = {"30min": "30m", "15min": "15m", "5min": "5m"}
 
 
 def _yahoo_bars(ticker, interval="30min"):
@@ -118,10 +121,10 @@ def _yahoo_bars(ticker, interval="30min"):
                  close=float(r.Close), volume=float(r.Volume)) for ts, r in df.dropna().iterrows()]
 
 
-def _spot_bars(api_key, interval="30min"):
+def _spot_bars(api_key, interval="30min", outputsize=100):
     """XAU/USD spot 30-min candles from Twelve Data (free key). Spot gold has no real volume."""
     r = requests.get("https://api.twelvedata.com/time_series",
-                     params=dict(symbol="XAU/USD", interval=interval, outputsize=100,
+                     params=dict(symbol="XAU/USD", interval=interval, outputsize=outputsize,
                                  timezone="UTC", apikey=api_key), timeout=30)
     r.raise_for_status()
     data = r.json()
@@ -168,6 +171,11 @@ def get_bars_history():
 def get_bars_5min():
     key = os.environ.get("TWELVEDATA_API_KEY")
     return _spot_bars(key, "5min") if key else _yahoo_bars(TICKER, "5min")
+
+
+def get_bars_15min():
+    key = os.environ.get("TWELVEDATA_API_KEY")
+    return _spot_bars(key, "15min", 250) if key else _yahoo_bars(TICKER, "15min")
 
 
 def get_bars():
@@ -223,6 +231,16 @@ def main():
             messages.append(format_entry(state["pending"], price))
         if result:
             state.pop("pending")
+    try:
+        sent = state.get("raja_sent", [])
+        for e in raja.find_entries(get_bars_15min(), now):
+            k = raja.entry_key(e)
+            if k not in sent and now - e["at"] <= RAJA_FRESH:
+                sent.append(k)
+                messages.append(raja.format_raja(e))
+        state["raja_sent"] = sent[-50:]
+    except Exception as exc:  # one strategy failing must not block the other
+        print(f"Raja check failed: {exc}")
     save_state(state)
     if not messages and os.environ.get("FORCE_MESSAGE", "").lower() == "true":
         last = bars[-1] if bars else None

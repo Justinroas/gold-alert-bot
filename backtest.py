@@ -8,6 +8,7 @@ import os
 from datetime import timedelta
 
 import alert
+import raja
 
 
 def replay(bars, tight, impulse):
@@ -57,12 +58,44 @@ def main():
     for a in al:
         out.append(f"| {a['at']:%a %b %d %-I:%M %p} | {a['side']} | ${a['entry']:,.2f} | "
                    f"{'yes' if a['entered'] else 'no'} | +${a['best']:,.2f} | -${a['worst']:,.2f} |")
+    out += raja_replay()
     text = "\n".join(out)
     print(text)
     path = os.environ.get("GITHUB_STEP_SUMMARY")
     if path:
         with open(path, "a") as f:
             f.write(text + "\n")
+
+
+def raja_replay():
+    key = os.environ.get("TWELVEDATA_API_KEY")
+    if not key:
+        return []
+    bars = alert._spot_bars(key, "15min", 5000)
+    days = sorted({raja.trading_day(b["start"]) for b in bars})[1:]
+    found = []
+    for d in days:
+        from datetime import datetime, time
+        cutoff = datetime.combine(d, time(12, 0), tzinfo=raja.NY)
+        upto = [b for b in bars if b["start"] < cutoff]
+        if not upto or raja.trading_day(upto[-1]["start"]) != d:
+            continue
+        later = [b for b in bars if b["start"] >= cutoff - timedelta(hours=5)
+                 and raja.trading_day(b["start"]) == d]
+        for e in raja.find_entries(upto, cutoff):
+            e["result"] = raja.outcome(e, later)
+            found.append(e)
+    wk = len(days)
+    count = lambda r: sum(e["result"] == r for e in found)
+    out = ["", "## Replay: Raja Banks break & retest (15-min, 7-11am NY)", "",
+           f"{len(found)} entries over {wk} trading days (about {len(found) / max(wk, 1) * 5:.1f} a week).", "",
+           f"Hit take profit 2 (50 pips): {count('TP2')}, hit TP1 then stopped: {count('TP1 then stop')}, "
+           f"TP1 only by day end: {count('TP1')}, stopped out first: {count('SL')}, neither by day end: {count('open')}.", "",
+           "| Time (NY) | Side | Levels | Entry | Stop | Result |", "|---|---|---|---|---|---|"]
+    for e in found:
+        out.append(f"| {e['at']:%a %b %d %-I:%M %p} | {e['side']} | {', '.join(n for n, _ in e['levels'])} | "
+                   f"${e['entry']:,.2f} | ${e['stop']:,.2f} | {e['result']} |")
+    return out
 
 
 if __name__ == "__main__":
