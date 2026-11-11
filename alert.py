@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 NY = ZoneInfo("America/New_York")
+STRATEGY = "📘 Strategy: Giovanni's 30-min breakout"
 TICKER = os.environ.get("TICKER", "GC=F")  # gold futures: used for volume (spot XAU/USD has none)
 BAR = timedelta(minutes=30)
 BOX_BARS = int(os.environ.get("BOX_BARS", "6"))        # 6 candles = 3 hours
@@ -74,7 +75,8 @@ def format_alert(a):
     icon = "🟢" if a["side"] == "BUY" else "🔴"
     level = "resistance" if a["side"] == "BUY" else "support"
     trigger = "above" if a["side"] == "BUY" else "below"
-    return (f"{icon} XAU/USD {a['side']} BREAKOUT ({a['at']:%-I:%M %p} NY, 30-min)\n"
+    return (f"{STRATEGY}\n"
+            f"{icon} XAU/USD {a['side']} BREAKOUT ({a['at']:%-I:%M %p} NY, 30-min)\n"
             f"Closed {trigger} {level}: ${a['close']:,.2f}\n"
             f"Box: support ${a['bottom']:,.2f} / resistance ${a['top']:,.2f}\n"
             f"Impulsive: {a['why']}\n"
@@ -99,7 +101,8 @@ def check_entry(pending, bars5, now):
 def format_entry(pending, price):
     icon = "🚀" if pending["side"] == "BUY" else "🔻"
     word = "above the high" if pending["side"] == "BUY" else "below the low"
-    return (f"{icon} XAU/USD {pending['side']} ENTRY TRIGGERED\n"
+    return (f"{STRATEGY}\n"
+            f"{icon} XAU/USD {pending['side']} ENTRY TRIGGERED\n"
             f"Price broke {word} of the breakout candle (${pending['entry']:,.2f}).\n"
             f"Price reached: ${price:,.2f}")
 
