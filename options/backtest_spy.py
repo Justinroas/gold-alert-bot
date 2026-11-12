@@ -28,7 +28,8 @@ def load(ticker, interval, period):
     df = yf.download(ticker, period=period, interval=interval, auto_adjust=False, progress=False)
     df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
     df = df.dropna()
-    df.index = df.index.tz_convert(NY)
+    if df.index.tz is not None:  # daily candles have no time zone
+        df.index = df.index.tz_convert(NY)
     return df
 
 
