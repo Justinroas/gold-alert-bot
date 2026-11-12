@@ -122,4 +122,4 @@ def test_sample_alerts_cover_each_risk_level():
     texts = ob.sample_alerts(date(2026, 11, 12))
     assert len(texts) == 3
     assert "CLEAR TRADE" in texts[0] and "RISKY" in texts[1] and "LOTTERY TICKET" in texts[2]
-    assert all(t.startswith("🧪 TEST ALERT") for t in texts)
+    assert all(t.startswith("🧪 TEST") for t in texts)

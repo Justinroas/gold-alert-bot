@@ -103,6 +103,9 @@ def simulate(days, or_minutes, bar_minutes, last_signal, vix=None):
             if result_a is None:
                 result_a = move / risk
             vix_now = intr.get(ts)
+            if vix_now is None and intr:  # hourly VIX bars may not line up exactly: use the last one before
+                earlier = [k for k in intr if k.date() == d and k <= ts]
+                vix_now = intr[max(earlier)] if earlier else None
             vix_prev = prev_close.get(d)
             vix_dir = None
             if vix_now is not None and vix_prev:
