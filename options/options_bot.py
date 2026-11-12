@@ -6,9 +6,8 @@ What it sends to Telegram (its own "Options Alerts" group, separate from the gol
    - how much the options market expects each upcoming earnings to move the stock
    - for each stock: are its options CHEAP, FAIR or PRICEY right now?
 2. Big move alert (9:45am-4pm): a stock on the watchlist moves a lot from yesterday's close.
-   Includes the latest headline and the full math for an example call or put.
-3. Big bets alert (9:45am-4pm, every 30 min): someone traded a huge number of one option contract
-   (volume many times the open interest), a hint that big money expects a move.
+   Says whether there's a setup (call or put) or not, and picks an option that fits the
+   budget (default $100) with its cost, breakeven, chance of paying off and max loss.
 
 "Cheap or pricey" = implied volatility (how much movement the option price assumes)
 vs historical volatility (how much the stock really moved over the last 20 trading days).
@@ -35,10 +34,10 @@ CHEAP_BELOW = 0.9    # implied vol / real vol below this = cheap
 PRICEY_ABOVE = 1.3   # above this = pricey
 EVENT_DAYS = 14      # how far ahead the brief looks for Fed / CPI / jobs
 EARNINGS_DAYS = 14   # how far ahead it looks for earnings
-UOA_MIN_VOLUME = 2000
-UOA_VOL_OI = 5
-UOA_MIN_DOLLARS = 1_000_000  # ignore small-money bets
-UOA_MIN_DOLLARS_ETF = 5_000_000  # SPY/QQQ trade huge amounts every day
+BUDGET = float(os.environ.get("BUDGET", "100"))  # most you want to spend per trade, in dollars
+PICK_MIN_DAYS, PICK_MAX_DAYS = 7, 45  # expiries the budget pick looks at
+HOLD_STRONG = 0.6  # price in the top 40% of today's range (bottom 40% for drops) = holding the move
+HOLD_WEAK = 0.35   # gave back most of the move = fading
 RATE = 0.04
 
 BRIEF_START = time(8, 45)
@@ -139,7 +138,7 @@ def nice_date(d):
     return d.strftime("%a %b ") + str(d.day)
 
 
-def trade_math(ticker, kind, price, strike, premium, expiry, today):
+def trade_math(ticker, kind, price, strike, premium, expiry, today, prob=None, title=None):
     """Plain-words math for buying ONE contract."""
     exp = datetime.strptime(expiry, "%Y-%m-%d").date()
     days = (exp - today).days
@@ -161,7 +160,7 @@ def trade_math(ticker, kind, price, strike, premium, expiry, today):
     icon = "📗" if kind == "call" else "📕"
     bet = "goes UP" if kind == "call" else "goes DOWN"
     lines = [
-        f"{icon} Example {kind.upper()} (a bet {ticker} {bet}):",
+        title or f"{icon} Example {kind.upper()} (a bet {ticker} {bet}):",
         f"  {ticker} {money(strike)} {kind}, expires {nice_date(exp)} ({days} days)",
         f"  Price {money(premium)} per share. 1 contract = 100 shares,",
         f"  so 1 contract costs {money(premium)} x 100 = {money(cost)}",
@@ -169,6 +168,8 @@ def trade_math(ticker, kind, price, strike, premium, expiry, today):
         f" ({need:+.1f}% from {money(price)})" if kind == "call" else
         f"  Breakeven: {ticker} must be {dirword} {money(be)} on {nice_date(exp)}"
         f" (-{need:.1f}% from {money(price)})",
+        *([f"  Chance it pays off by then (options-market math): about {prob * 100:.0f}%"
+           + ("  ⚠️ long shot" if prob < 0.2 else "")] if prob is not None else []),
         f"  Most you can lose: {money(cost)} (if {ticker} ends {endword} {money(strike)})",
         f"  If {ticker} moves {move:.0f}% to {money(target)} by then: worth about ${value:,.0f},"
         f" {'profit' if profit >= 0 else 'loss'} about ${abs(profit):,.0f}",
@@ -212,6 +213,76 @@ def move_level(pct, threshold):
     return 2 if a >= 2 * threshold else 1 if a >= threshold else 0
 
 
+def prob_profit(kind, spot, breakeven, years, vol, rate=RATE):
+    """Chance the stock ends past the breakeven at expiry, using the volatility the option
+    price itself assumes (lognormal, same model as the option price)."""
+    if years <= 0 or vol <= 0 or breakeven <= 0:
+        return 0.0
+    d2 = (math.log(spot / breakeven) + (rate - vol * vol / 2) * years) / (vol * math.sqrt(years))
+    return _ncdf(d2) if kind == "call" else _ncdf(-d2)
+
+
+def classify_setup(pct, high, low, price):
+    """Is the big move holding (setup) or fading (wait)?
+    Returns (kind or None, label, explanation)."""
+    rng = high - low
+    if rng <= 0:
+        return None, "WAIT", "not enough movement today to read it."
+    up = pct > 0
+    hold = (price - low) / rng if up else (high - price) / rng
+    mid = (high + low) / 2
+    if hold >= HOLD_STRONG:
+        if up:
+            return ("call", "📗 CALL setup (momentum)",
+                    f"It's holding near today's high. Idea: get in if it breaks {money(high)} (today's high)."
+                    f" Get out if it drops back under {money(mid)} (middle of today's range).")
+        return ("put", "📕 PUT setup (momentum)",
+                f"It's holding near today's low. Idea: get in if it breaks {money(low)} (today's low)."
+                f" Get out if it climbs back over {money(mid)} (middle of today's range).")
+    if hold <= HOLD_WEAK:
+        return (None, "⏳ NO CLEAN SETUP (fading)",
+                "It moved big but already gave most of it back. Chasing now is a coin flip. Better to wait.")
+    edge = high if up else low
+    return (None, "⏳ NOT YET (choppy)",
+            f"It's stuck in the middle of today's range. Wait: a {'call' if up else 'put'} only makes sense"
+            f" if it breaks {money(edge)} (today's {'high' if up else 'low'}).")
+
+
+def budget_pick(mkt, sym, kind, price, today, budget=BUDGET):
+    """The option that fits the budget (1 contract) with the best chance of paying off."""
+    best = None
+    for exp in mkt.expiries(sym):
+        days = (datetime.strptime(exp, "%Y-%m-%d").date() - today).days
+        if not PICK_MIN_DAYS <= days <= PICK_MAX_DAYS:
+            continue
+        calls, puts = mkt.chain(sym, exp)
+        years = days / 365
+        for r in (calls if kind == "call" else puts):
+            p, k = premium_of(r), r.get("strike")
+            if not k or p < 0.05 or p * 100 > budget or not (r.get("bid") or 0) > 0:
+                continue
+            iv = implied_vol(kind, p, price, k, years)
+            if not iv:
+                continue
+            be = k + p if kind == "call" else k - p
+            pr = prob_profit(kind, price, be, years, iv)
+            if best is None or pr > best["prob"]:
+                best = dict(strike=k, premium=p, expiry=exp, prob=pr, iv=iv)
+    return best
+
+
+def budget_text(sym, kind, price, pick, today, budget=BUDGET):
+    if not pick:
+        return (f"💵 YOUR ${budget:.0f} PICK: no {sym} {kind} under ${budget:.0f} that's worth it."
+                f" {sym} options are too expensive for this budget. Skip it or wait for a cheaper stock.")
+    n = int(budget // (pick["premium"] * 100))
+    text = trade_math(sym, kind, price, pick["strike"], pick["premium"], pick["expiry"], today,
+                      prob=pick["prob"], title=f"💵 YOUR ${budget:.0f} PICK:")
+    if n > 1:
+        text += f"\n  (Your ${budget:.0f} buys {n} contracts = {money(n * pick['premium'] * 100)}. Multiply the numbers by {n}.)"
+    return text + "\n  Simple rule: sell if the option doubles, get out if it loses half."
+
+
 # ---------- market data (Yahoo Finance via yfinance) ----------
 
 class Market:
@@ -225,10 +296,17 @@ class Market:
             self._t[sym] = self.yf.Ticker(sym)
         return self._t[sym]
 
+    def bars(self, sym):
+        """Daily candles (date, open, high, low, close), oldest first. Today's is live."""
+        if ("bars", sym) not in self._t:
+            df = self.t(sym).history(period="1y", interval="1d", auto_adjust=False)
+            df = df.dropna(subset=["Close"])
+            self._t[("bars", sym)] = [dict(date=ts.date(), open=float(r.Open), high=float(r.High),
+                                          low=float(r.Low), close=float(r.Close)) for ts, r in df.iterrows()]
+        return self._t[("bars", sym)]
+
     def daily(self, sym):
-        df = self.t(sym).history(period="1y", interval="1d", auto_adjust=False)
-        df = df.dropna(subset=["Close"])
-        return [(ts.date(), float(c)) for ts, c in zip(df.index, df["Close"])]
+        return [(b["date"], b["close"]) for b in self.bars(sym)]
 
     def chain(self, sym, expiry):
         ch = self.t(sym).option_chain(expiry)
@@ -341,64 +419,43 @@ def build_brief(mkt, watchlist, today):
                      " (the 'IV crush'). Buying calls/puts the day before earnings only pays if the move"
                      " is BIGGER than the ± number above.")
     parts.append("💲 CHEAP OR PRICEY?\n" + "\n".join(verdicts) + "\n\n" + VERDICT_HELP)
-    cheapest = [s for s in snaps.values() if verdict(s["iv"], s["hv"])[1] == "CHEAP" and s["opts"].get("call")]
+    cheapest = [s for s in snaps.values() if verdict(s["iv"], s["hv"])[1] == "CHEAP"]
     if cheapest:
         s = min(cheapest, key=lambda s: s["iv"] / s["hv"])
-        o = s["opts"]["call"]
-        parts.append(f"🧮 THE MATH, cheapest options today: {s['sym']}\n"
-                     + trade_math(s["sym"], "call", s["price"], o["strike"], o["premium"], o["expiry"], today))
+        try:
+            pick = budget_pick(mkt, s["sym"], "call", s["price"], today)
+        except Exception as e:
+            print(f"{s['sym']}: budget pick failed: {e}")
+            pick = None
+        if pick:
+            parts.append(f"🧮 THE MATH, cheapest options today: {s['sym']} (example only, not a setup)\n"
+                         + budget_text(s["sym"], "call", s["price"], pick, today))
     parts.append("Alerts only, not advice. Never risk money you can't lose.")
     return "\n\n".join(parts)
 
 
-def build_move_alert(mkt, s, pct, level, today):
+def build_move_alert(mkt, s, pct, level, today, earn=None):
     sym, price = s["sym"], s["price"]
+    bar = mkt.bars(sym)[-1]
     up = pct > 0
     head = "🚀" if up else "🩸"
     size = "HUGE" if level == 2 else "BIG"
     prev = s["days"][-2][1]
+    kind, label, why = classify_setup(pct, bar["high"], bar["low"], price)
     parts = [f"{head} {size} MOVE: {sym} {'UP' if up else 'DOWN'} {pct:+.1f}% today",
-             f"Now {money(price)} (yesterday closed at {money(prev)})"]
+             f"Now {money(price)} (yesterday closed at {money(prev)}). Today's range {money(bar['low'])} to {money(bar['high'])}."]
     h = mkt.headline(sym)
     if h:
-        parts.append(f"📰 Latest news: {h}")
+        parts.append(f"📰 News: {h}")
+    parts.append(f"🎯 {label}\n{why}")
+    if kind:
+        parts.append(budget_text(sym, kind, price, budget_pick(mkt, sym, kind, price, today), today))
     parts.append(verdict_line(sym, s["iv"], s["hv"]))
-    kind = "call" if up else "put"
-    o = s["opts"].get(kind)
-    if o:
-        parts.append("If you think the move keeps going:\n"
-                     + trade_math(sym, kind, price, o["strike"], o["premium"], o["expiry"], today))
-    parts.append("⚠️ Chasing a big move is risky. Stocks often snap back the same day.")
-    return "\n\n".join(parts)
-
-
-def find_big_bets(mkt, sym, price, today, exps, n_exp=2):
-    out = []
-    later = [e for e in exps if (datetime.strptime(e, "%Y-%m-%d").date() - today).days >= 2]
-    for exp in later[:n_exp]:
-        calls, puts = mkt.chain(sym, exp)
-        for kind, rows in (("call", calls), ("put", puts)):
-            for r in rows:
-                vol, oi = r.get("volume") or 0, r.get("openInterest") or 0
-                if vol != vol or oi != oi:  # NaN
-                    continue
-                prem = premium_of(r)
-                if (vol >= UOA_MIN_VOLUME and vol >= UOA_VOL_OI * max(oi, 1)
-                        and prem * 100 * vol >= (UOA_MIN_DOLLARS_ETF if sym in ETFS else UOA_MIN_DOLLARS)):
-                    out.append(dict(sym=sym, kind=kind, strike=r["strike"], expiry=exp,
-                                    volume=int(vol), oi=int(oi), premium=prem,
-                                    dollars=prem * 100 * vol))
-    return out
-
-
-def build_big_bet_alert(b, price):
-    exp = datetime.strptime(b["expiry"], "%Y-%m-%d").date()
-    bet = "UP 📈" if b["kind"] == "call" else "DOWN 📉"
-    return (f"🐳 BIG BET: {b['sym']} {money(b['strike'])} {b['kind']}s expiring {nice_date(exp)}\n"
-            f"{b['volume']:,} contracts traded today vs {b['oi']:,} that existed before"
-            f" (about {money(b['dollars'])} spent). Big money may expect {b['sym']} to go {bet}.\n"
-            f"Stock now {money(price)}, option about {money(b['premium'])} ({money(b['premium'] * 100)} per contract).\n"
-            "Could also be a hedge or a seller, so treat it as a heads-up, not a signal.")
+    if earn is not None and 0 <= (earn - today).days <= 3:
+        parts.append(f"📣 Heads up: {sym} reports earnings {nice_date(earn)} ({when_word(earn, today)})."
+                     " Option prices drop right after earnings, even if you guess right.")
+    parts.append("Alerts only, not advice. Only risk money you're OK losing.")
+    return "\n\n".join(parts), kind
 
 
 # ---------- Telegram ----------
@@ -499,7 +556,7 @@ def main():
         return
     if state.pop("new_chat", False) and not quiet:
         send("✅ Options alerts are ON for this chat.\nEvery weekday: a morning brief at 8:45am New York,"
-             " plus alerts for big moves and big bets on the watchlist.\nAlerts only, not advice.", chat_id, state)
+             " plus big-move alerts with a call or put setup that fits a $100 budget.\nAlerts only, not advice.", chat_id, state)
     weekday = today.weekday() < 5
     watch = load_watchlist()
     mkt = Market()
@@ -515,7 +572,6 @@ def main():
         save_state(state)
 
     if FORCE in ("scan", "all") or (weekday and SCAN_START <= now.time() <= SCAN_END):
-        do_uoa = FORCE or now.timestamp() - state.get("uoa_at", 0) >= 29 * 60
         for sym in watch:
             try:
                 days = mkt.daily(sym)
@@ -525,21 +581,22 @@ def main():
                 lvl = move_level(pct, MOVE_PCT_ETF if sym in ETFS else MOVE_PCT_STOCK)
                 key = f"{day}:move:{sym}:{'up' if pct > 0 else 'down'}"
                 print(f"{sym}: {pct:+.2f}% level {lvl}")
-                if lvl and (sent.get(key, 0) < lvl or FORCE):
+                if not lvl:
+                    continue
+                bar = mkt.bars(sym)[-1]
+                setup = classify_setup(pct, bar["high"], bar["low"], days[-1][1])[0]
+                had = sent.get(key) or {}
+                if not isinstance(had, dict):  # older format: a number, already alerted
+                    had = dict(lvl=had, setup=True)
+                # Alert on a new or bigger move, or when a setup shows up after a "wait" alert.
+                if FORCE or lvl > had.get("lvl", 0) or (setup and not had.get("setup")):
                     s = snapshot(mkt, sym, today)
-                    chat_id = send(build_move_alert(mkt, s, pct, lvl, today), None if quiet else chat_id, state) or chat_id
-                    sent[key] = lvl
-                if do_uoa:
-                    bets = find_big_bets(mkt, sym, days[-1][1], today, mkt.expiries(sym))
-                    for b in sorted(bets, key=lambda b: -b["dollars"])[:1]:
-                        k = f"{day}:bet:{sym}:{b['kind']}:{b['strike']}:{b['expiry']}"
-                        if k not in sent or FORCE:
-                            chat_id = send(build_big_bet_alert(b, days[-1][1]), None if quiet else chat_id, state) or chat_id
-                            sent[k] = 1
+                    earn = None if sym in ETFS else mkt.earnings_date(sym, today)
+                    text, kind = build_move_alert(mkt, s, pct, lvl, today, earn)
+                    chat_id = send(text, None if quiet else chat_id, state) or chat_id
+                    sent[key] = dict(lvl=max(lvl, had.get("lvl", 0)), setup=bool(kind) or had.get("setup", False))
             except Exception as e:
                 print(f"{sym}: scan failed: {e}")
-        if do_uoa:
-            state["uoa_at"] = now.timestamp()
     save_state(state)
 
 

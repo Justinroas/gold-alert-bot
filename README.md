@@ -50,8 +50,10 @@ Code: `options/options_bot.py`, workflow: `.github/workflows/options-alert.yml`.
   how big a move options expect from each earnings; whether each stock's options are CHEAP, FAIR or PRICEY;
   and the math for one example trade.
 - **Big move alert** (9:45am-4pm): a stock moves 3% (ETFs 1.5%) from yesterday's close. A second alert at 6% / 3%.
-  Includes the latest headline and the cost, breakeven and max loss of an example call or put.
-- **Big bet alert** (every 30 min): an option trades at least 5x its open interest and $1M+ ($5M+ for ETFs).
+  It says if there's a setup: **CALL** (up and holding near today's high), **PUT** (down and holding near
+  today's low), or **wait** (fading or choppy; you get a new alert if a setup forms later). For a setup it picks
+  the option under the budget (`BUDGET`, default $100 for 1 contract, expiring in 7-45 days) with the best
+  chance of paying off, and shows cost, breakeven, that chance, and max loss.
 
 Cheap or pricey = implied volatility (what the option price assumes) vs how much the stock normally moves
 (average of its last-month and last-year volatility). Data: Yahoo Finance (free, about 15 min delayed for options).

@@ -65,3 +65,45 @@ def test_watchlist(monkeypatch):
     assert ob.load_watchlist() == ["SPY", "NVDA"]
     monkeypatch.delenv("WATCHLIST")
     assert "SPY" in ob.load_watchlist()
+
+
+def test_prob_profit():
+    # breakeven at today's price, tiny drift: about a coin flip
+    assert 0.4 < ob.prob_profit("call", 100, 100, 30 / 365, 0.4) < 0.55
+    # far away breakeven: small chance
+    assert ob.prob_profit("call", 100, 130, 30 / 365, 0.4) < 0.05
+    assert ob.prob_profit("put", 100, 70, 30 / 365, 0.4) < 0.05
+
+
+def test_classify_setup():
+    # up 5%, closing near the high -> call
+    assert ob.classify_setup(5, 110, 100, 109)[0] == "call"
+    # up 5% but back near the low -> wait
+    k, label, _ = ob.classify_setup(5, 110, 100, 102)
+    assert k is None and "fading" in label
+    # down, holding near the low -> put
+    assert ob.classify_setup(-5, 100, 90, 91)[0] == "put"
+    # middle -> wait
+    assert ob.classify_setup(-5, 100, 90, 95)[0] is None
+
+
+class FakeMkt:
+    def expiries(self, sym):
+        return ["2026-11-13", "2026-11-27", "2026-12-18", "2027-03-19"]
+
+    def chain(self, sym, exp):
+        years = (date.fromisoformat(exp) - date(2026, 11, 12)).days / 365
+        rows = []
+        for k in range(90, 131, 5):
+            p = round(ob.bs_price("call", 100, k, years, 0.5), 2)
+            rows.append(dict(strike=k, bid=p - 0.02, ask=p + 0.02, lastPrice=p))
+        return rows, []
+
+
+def test_budget_pick_fits_budget_and_window():
+    pick = ob.budget_pick(FakeMkt(), "XYZ", "call", 100, date(2026, 11, 12), budget=100)
+    assert pick and pick["premium"] * 100 <= 100
+    assert pick["expiry"] in ("2026-11-27", "2026-12-18")  # 7-45 days only
+    t = ob.budget_text("XYZ", "call", 100, pick, date(2026, 11, 12))
+    assert "YOUR $100 PICK" in t and "Chance it pays off" in t
+    assert "no XYZ call under $100" in ob.budget_text("XYZ", "call", 100, None, date(2026, 11, 12))
