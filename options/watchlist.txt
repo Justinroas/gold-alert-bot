@@ -1,0 +1,12 @@
+# Stocks and ETFs the options bot watches. One per line. Edit freely.
+SPY   # S&P 500 (the whole market)
+QQQ   # Nasdaq 100 (big tech)
+NVDA
+TSLA
+AAPL
+AMZN
+MSFT
+META
+GOOGL
+AMD
+PLTR
