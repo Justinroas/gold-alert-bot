@@ -33,11 +33,12 @@ MOVE_PCT_STOCK = float(os.environ.get("MOVE_PCT_STOCK", "3"))  # % move from yes
 MOVE_PCT_ETF = float(os.environ.get("MOVE_PCT_ETF", "1.5"))
 CHEAP_BELOW = 0.9    # implied vol / real vol below this = cheap
 PRICEY_ABOVE = 1.3   # above this = pricey
-EVENT_DAYS = 7       # how far ahead the brief looks for Fed / CPI / jobs
+EVENT_DAYS = 14      # how far ahead the brief looks for Fed / CPI / jobs
 EARNINGS_DAYS = 14   # how far ahead it looks for earnings
 UOA_MIN_VOLUME = 2000
 UOA_VOL_OI = 5
-UOA_MIN_DOLLARS = 250_000  # ignore small-money bets
+UOA_MIN_DOLLARS = 1_000_000  # ignore small-money bets
+UOA_MIN_DOLLARS_ETF = 5_000_000  # SPY/QQQ trade huge amounts every day
 RATE = 0.04
 
 BRIEF_START = time(8, 45)
@@ -169,8 +170,8 @@ def trade_math(ticker, kind, price, strike, premium, expiry, today):
         f"  Breakeven: {ticker} must be {dirword} {money(be)} on {nice_date(exp)}"
         f" (-{need:.1f}% from {money(price)})",
         f"  Most you can lose: {money(cost)} (if {ticker} ends {endword} {money(strike)})",
-        f"  If {ticker} moves {move:.0f}% to {money(target)} by then: worth about {money(value)},"
-        f" {'profit' if profit >= 0 else 'loss'} about {money(abs(profit))}",
+        f"  If {ticker} moves {move:.0f}% to {money(target)} by then: worth about ${value:,.0f},"
+        f" {'profit' if profit >= 0 else 'loss'} about ${abs(profit):,.0f}",
     ]
     return "\n".join(lines)
 
@@ -183,10 +184,10 @@ def verdict_line(ticker, iv, hv, earnings_soon=False):
     if word == "PRICEY" and earnings_soon:
         extra = " (normal right before earnings)"
     return (f"{icon} {ticker}: {word}. Options assume {iv * 100:.0f}% yearly swings,"
-            f" it really moved {hv * 100:.0f}%{extra}")
+            f" it normally moves {hv * 100:.0f}%{extra}")
 
 
-VERDICT_HELP = ("🟢 CHEAP = options cost less than the stock's real moves. Good time to BUY calls/puts.\n"
+VERDICT_HELP = ("🟢 CHEAP = options cost less than how much the stock normally moves. Good time to BUY calls/puts.\n"
                 "🟡 FAIR = normal price.\n"
                 "🔴 PRICEY = you overpay. The stock must move a lot just to break even.")
 
@@ -225,7 +226,7 @@ class Market:
         return self._t[sym]
 
     def daily(self, sym):
-        df = self.t(sym).history(period="3mo", interval="1d", auto_adjust=False)
+        df = self.t(sym).history(period="1y", interval="1d", auto_adjust=False)
         df = df.dropna(subset=["Close"])
         return [(ts.date(), float(c)) for ts, c in zip(df.index, df["Close"])]
 
@@ -264,7 +265,11 @@ def snapshot(mkt, sym, today):
     days = mkt.daily(sym)
     closes = [c for _, c in days]
     price = closes[-1]
-    s = dict(sym=sym, price=price, hv=real_vol(closes), iv=None, days=days, opts={})
+    # "Normal" movement = blend of the last month and the last year, so one wild week
+    # doesn't make every option look cheap.
+    hv20, hv1y = real_vol(closes, 20), real_vol(closes, 250)
+    hv = (hv20 + hv1y) / 2 if hv20 and hv1y else hv20 or hv1y
+    s = dict(sym=sym, price=price, hv=hv, iv=None, days=days, opts={})
     exps = mkt.expiries(sym)
     exp = pick_expiry(exps, today)
     if not exp:
@@ -379,7 +384,7 @@ def find_big_bets(mkt, sym, price, today, exps, n_exp=2):
                     continue
                 prem = premium_of(r)
                 if (vol >= UOA_MIN_VOLUME and vol >= UOA_VOL_OI * max(oi, 1)
-                        and prem * 100 * vol >= UOA_MIN_DOLLARS):
+                        and prem * 100 * vol >= (UOA_MIN_DOLLARS_ETF if sym in ETFS else UOA_MIN_DOLLARS)):
                     out.append(dict(sym=sym, kind=kind, strike=r["strike"], expiry=exp,
                                     volume=int(vol), oi=int(oi), premium=prem,
                                     dollars=prem * 100 * vol))
@@ -391,9 +396,9 @@ def build_big_bet_alert(b, price):
     bet = "UP 📈" if b["kind"] == "call" else "DOWN 📉"
     return (f"🐳 BIG BET: {b['sym']} {money(b['strike'])} {b['kind']}s expiring {nice_date(exp)}\n"
             f"{b['volume']:,} contracts traded today vs {b['oi']:,} that existed before"
-            f" (about {money(b['dollars'])} spent). Someone is betting {b['sym']} goes {bet}.\n"
+            f" (about {money(b['dollars'])} spent). Big money may expect {b['sym']} to go {bet}.\n"
             f"Stock now {money(price)}, option about {money(b['premium'])} ({money(b['premium'] * 100)} per contract).\n"
-            "Big bets can be hedges, so treat this as a heads-up, not a signal.")
+            "Could also be a hedge or a seller, so treat it as a heads-up, not a signal.")
 
 
 # ---------- Telegram ----------
@@ -501,7 +506,7 @@ def main():
                     sent[key] = lvl
                 if do_uoa:
                     bets = find_big_bets(mkt, sym, days[-1][1], today, mkt.expiries(sym))
-                    for b in sorted(bets, key=lambda b: -b["dollars"])[:2]:
+                    for b in sorted(bets, key=lambda b: -b["dollars"])[:1]:
                         k = f"{day}:bet:{sym}:{b['kind']}:{b['strike']}:{b['expiry']}"
                         if k not in sent or FORCE:
                             send(build_big_bet_alert(b, days[-1][1]), chat_id)
