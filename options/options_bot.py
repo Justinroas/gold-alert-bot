@@ -14,6 +14,7 @@ vs historical volatility (how much the stock really moved over the last 20 tradi
 """
 import json
 import math
+import re
 import os
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -438,7 +439,25 @@ def build_dip_exit(sym, price, entry_price, reason):
 
 # ---------- News roundups ----------
 NEWS_TIMES = [(time(12, 0), time(12, 30)), (time(15, 25), time(15, 39))]
-NEWS_COUNT = 5
+NEWS_COUNT = 4
+NAMES = {"NVDA": "nvidia|huang", "AAPL": "apple|iphone", "AMZN": "amazon|aws", "MSFT": "microsoft",
+         "META": "meta|facebook|zuckerberg|instagram", "GOOGL": "google|alphabet|youtube", "AMD": r"\bamd\b",
+         "PLTR": "palantir", "TSLA": "tesla|musk", "IWM": "small.?cap|russell", "GLD": "gold"}
+MARKET_WORDS = (r"stock|market|wall street|dow|s&p|nasdaq|fed\b|powell|inflation|cpi|rates?\b|treasur|tariff"
+                r"|economy|recession|jobs|payroll|earnings season")
+JUNK = (r"retire|\bira\b|social security|401\(k\)|millionaire|should you buy|stocks? to buy|best .*stock"
+        r"|dividend stock|buy and hold|forever|passive income|crypto|bitcoin|my top")
+IMPACT = [
+    (r"earnings|results|quarter|revenue|guidance|forecast|outlook", "Earnings news moves stocks hard. Options get pricey before and lose value right after."),
+    (r"\bfed\b|powell|rate cut|rate hike|interest rate", "Fed and interest-rate news moves the whole market (SPY, QQQ)."),
+    (r"inflation|\bcpi\b|jobs|payroll|unemployment|gdp", "Economy news moves the whole market. Watch SPY and QQQ."),
+    (r"\bceo\b|resign|steps down|ousted|exit|succession", "A leadership shake-up means big swings, and big swings mean option opportunities."),
+    (r"upgrade|raises? .*target|outperform", "Analyst upgrade: can push the stock up."),
+    (r"downgrade|cuts? .*target|underperform", "Analyst downgrade: can push the stock down."),
+    (r"acquir|merger|buyout|takeover|\bdeal\b", "Deal news can make a stock jump fast."),
+    (r"lawsuit|probe|investigat|antitrust|\bsec\b|\bban\b|export|tariff|china", "Government or legal pressure can push the stock down."),
+    (r"\bai\b|chip|data center", "AI news drives tech stocks like NVDA, AMD and QQQ."),
+]
 NEWS_MAX_AGE_H = 12
 
 
@@ -462,10 +481,31 @@ def parse_news(it, sym):
     return dict(title=title.strip(), source=src, link=link, ts=ts, sym=sym)
 
 
+def relevant(n):
+    """Drop advice/listicle junk; a stock's headline must actually be about that company."""
+    t = n["title"].lower()
+    if re.search(JUNK, t):
+        return False
+    if n["sym"] in NAMES:
+        return bool(re.search(NAMES[n["sym"]], t))
+    return bool(re.search(MARKET_WORDS, t))
+
+
+def why_it_matters(n, pct=None):
+    t = n["title"].lower()
+    why = next((w for pat, w in IMPACT if re.search(pat, t)), None)
+    who = "the market" if n["sym"] in ("SPY", "QQQ") else n["sym"]
+    if why is None:
+        why = f"Could move {who}."
+    if pct is not None:
+        why = f"{'SPY' if who == 'the market' else who} is {pct:+.1f}% today. " + why
+    return why
+
+
 def pick_news(items, seen, now_ts, count=NEWS_COUNT):
-    """Newest headlines first, no repeats (same title seen today), market-wide ones first on ties."""
+    """Newest relevant headlines first, no repeats (same title already sent today)."""
     out, titles = [], set()
-    fresh = [n for n in items if n["ts"] and now_ts - n["ts"] <= NEWS_MAX_AGE_H * 3600]
+    fresh = [n for n in items if n["ts"] and now_ts - n["ts"] <= NEWS_MAX_AGE_H * 3600 and relevant(n)]
     for n in sorted(fresh, key=lambda n: -n["ts"]):
         key = n["title"].lower()
         if key in titles or key in seen:
@@ -477,12 +517,13 @@ def pick_news(items, seen, now_ts, count=NEWS_COUNT):
     return out
 
 
-def build_news(items, now):
-    lines = [f"📰 MARKET NEWS · {now.strftime('%-I:%M%p').lower()}"]
-    for n in items:
-        tag = "" if n["sym"] in ("SPY", "QQQ", "^GSPC") else f"[{n['sym']}] "
-        src = f" ({n['source']})" if n["source"] else ""
-        lines.append(f"• {tag}{n['title']}{src}" + (f"\n  {n['link']}" if n["link"] else ""))
+def build_news(n, pct=None):
+    """One headline per message, in the same style as the trade alerts."""
+    who = "" if n["sym"] in ("SPY", "QQQ") else f" · {n['sym']}"
+    src = f" ({n['source']})" if n["source"] else ""
+    lines = [f"📰 MARKET NEWS{who}", f"{n['title']}{src}", f"Why it matters: {why_it_matters(n, pct)}"]
+    if n["link"]:
+        lines.append(n["link"])
     return "\n".join(lines)
 
 
@@ -909,8 +950,16 @@ def main():
                 items += mkt.news(sym)
             seen = set(state.get("news_seen", {}).get(day, []))
             pick = pick_news(items, seen, now.timestamp())
+            for n in pick:
+                pct = None
+                try:
+                    d = mkt.daily("SPY" if n["sym"] == "QQQ" else n["sym"])
+                    if d[-1][0] == today:
+                        pct = (d[-1][1] / d[-2][1] - 1) * 100
+                except Exception:
+                    pass
+                chat_id = send(build_news(n, pct), None if quiet else chat_id, state) or chat_id
             if pick:
-                chat_id = send(build_news(pick, now), None if quiet else chat_id, state) or chat_id
                 state["news_seen"] = {day: sorted(seen | {n["title"].lower() for n in pick})}
         except Exception as e:
             print(f"News roundup failed: {e}")
