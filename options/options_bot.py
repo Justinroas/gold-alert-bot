@@ -286,6 +286,22 @@ def risk_tag(prob):
     return "🔴 LOTTERY TICKET", "small chance, big payout if it hits. Only money you're fine losing"
 
 
+RISK_WORDS = {"🟢 CLEAR TRADE": "🟢 Clear trade", "🟡 RISKY": "🟡 Risky", "🔴 LOTTERY TICKET": "🔴 Lottery ticket (small bet only)"}
+
+
+def signal_text(kind, sym, why, pick, sell):
+    """Every alert in the same plain format: what to do, why, what to buy, when to sell, how risky."""
+    lines = [f"{'📗 BUY CALL' if kind == 'call' else '📕 BUY PUT'} · {sym}", f"Why: {why}"]
+    if pick:
+        exp = datetime.strptime(pick["expiry"], "%Y-%m-%d").date()
+        lines.append(f"Buy: {sym} {short_money(pick['strike'])} {kind}, expires {exp.strftime('%b')} {exp.day},"
+                     f" about {short_money(pick['premium'] * 100)}")
+    lines.append(f"Sell: {sell}")
+    if pick:
+        lines.append(f"Risk: {RISK_WORDS[risk_tag(pick['prob'])[0]]}")
+    return "\n".join(lines)
+
+
 def budget_text(sym, kind, price, pick, today, budget=BUDGET):
     if not pick:
         return (f"💵 YOUR ${budget:.0f} PICK: none. No {sym} {kind} under ${budget:.0f} is for sale right now."
@@ -338,21 +354,12 @@ def orb_signal(spy_bars, vix_bars, vix_prev_close, now):
 
 def build_orb_alert(sig, pick, today):
     up = sig["side"] == "call"
-    vix_word = "falling (fear dropping)" if up else "rising (fear growing)"
-    tag = f" · {risk_tag(pick['prob'])[0]}" if pick else ""
-    lines = [f"📘 SPY BREAKOUT · {'📗 CALL' if up else '📕 PUT'}{tag}",
-             f"Why: SPY broke {'above' if up else 'below'} its first-15-min {'high' if up else 'low'}"
-             f" ({short_money(sig['hi'] if up else sig['lo'])}) and VIX is {vix_word}: {sig['vix']:.1f} vs {sig['vix_prev']:.1f} yesterday ✅",
-             f"Entry: ~{short_money(sig['price'])} · Stop: {'under' if up else 'over'} {short_money(sig['stop'])}"
-             f" · Target: {short_money(sig['target'])}"]
-    if sig["vix"] >= 20:
-        lines.append("⭐ VIX 20+: big-move day, this setup has worked best on days like this")
-    if pick:
-        exp = datetime.strptime(pick["expiry"], "%Y-%m-%d").date()
-        lines.append(f"Option: {short_money(pick['strike'])} {sig['side']} · exp {exp.strftime('%b')} {exp.day}"
-                     f" · {short_money(pick['premium'])} ({short_money(pick['premium'] * 100)}/contract)"
-                     f" · {pick['prob'] * 100:.0f}% chance")
-    return "\n".join(lines)
+    why = (f"SPY broke {'above' if up else 'below'} its morning range and the market's fear is"
+           f" {'dropping' if up else 'rising'} (VIX {sig['vix']:.1f} vs {sig['vix_prev']:.1f} yesterday)."
+           + (" Extra strong day for this setup ⭐" if sig["vix"] >= 20 else ""))
+    sell = (f"if SPY {'drops under' if up else 'climbs over'} {short_money(sig['stop'])}."
+            f" Take profit when SPY hits {short_money(sig['target'])}.")
+    return signal_text(sig["side"], "SPY", why, pick, sell)
 
 
 # ---------- Panic dip: healthy stock dumped in a scared market -> CALL ----------
@@ -415,29 +422,18 @@ def dip_pick(mkt, sym, price, today):
 
 
 def build_dip_alert(sym, price, sig, vix, pick):
-    tag = f" · {risk_tag(pick['prob'])[0]}" if pick else ""
     win = DIP_WIN.get(sym)
-    lines = [f"🟢 PANIC DIP · {sym} · 📗 CALL{tag}",
-             f"Why: {sym} got dumped (RSI-2 {sig['rsi']:.0f}) but is still in a long-term uptrend, and VIX {vix:.0f} = market scared."
-             + (f" Won {win}% over 10 yrs" if win else "") + ", usually bounces in ~3 days.",
-             f"Buy before 4pm: {sym} ~{short_money(price)}"]
-    if pick:
-        exp = datetime.strptime(pick["expiry"], "%Y-%m-%d").date()
-        lines.append(f"Option: {short_money(pick['strike'])} call · exp {exp.strftime('%b')} {exp.day}"
-                     f" · {short_money(pick['premium'])} ({short_money(pick['premium'] * 100)}/contract)"
-                     f" · {pick['prob'] * 100:.0f}% chance")
-    lines.append(f"Sell when: {sym} closes above its 5-day avg (~{short_money(sig['avg5'])}). I'll alert you.")
-    return "\n".join(lines)
+    why = (f"Good stock, big 2-day drop (RSI-2: {sig['rsi']:.0f}), and the whole market is scared (VIX: {vix:.0f})."
+           f" These usually bounce back in about 3 days"
+           + (f" ({win}% of the time over 10 years)." if win else "."))
+    return signal_text("call", sym, why, pick, "I'll tell you (usually in about 3 days). Buy before 4pm today.")
 
 
 def build_dip_exit(sym, price, entry_price, reason):
     chg = (price / entry_price - 1) * 100
     if reason == "bounce":
-        return (f"💰 SELL · {sym} call (panic dip)\n"
-                f"{sym} closed back above its 5-day avg: the bounce is here. Stock {chg:+.1f}% since the alert"
-                f" ({short_money(entry_price)} → {short_money(price)}). Take it.")
-    return (f"⏰ SELL · {sym} call (panic dip)\n"
-            f"No bounce after {DIP_MAX_DAYS} trading days. Stock {chg:+.1f}% since the alert. Get out before the option loses more.")
+        return f"💰 SELL NOW · {sym} call\nThe bounce happened. {sym} is {chg:+.1f}% since the buy alert."
+    return f"⏰ SELL NOW · {sym} call\nNo bounce after {DIP_MAX_DAYS} days ({sym} {chg:+.1f}%). Get out before it loses more."
 
 
 # ---------- market data (Yahoo Finance via yfinance) ----------
@@ -585,35 +581,22 @@ def short_money(x):
 
 
 def build_move_alert(mkt, s, pct, level, today, earn=None, pick=None):
-    """Short, signal-chat style. Returns (text, kind); text is None when there's no setup."""
+    """Returns (text, kind); text is None when there's no setup."""
     sym, price = s["sym"], s["price"]
     bar = mkt.bars(sym)[-1]
-    kind, label, _ = classify_setup(pct, bar["high"], bar["low"], price)
+    kind, _, _ = classify_setup(pct, bar["high"], bar["low"], price)
     if not kind:
         return None, None
     pick = pick or budget_pick(mkt, sym, kind, price, today)
     up = kind == "call"
     mid = (bar["high"] + bar["low"]) / 2
-    entry = bar["high"] if up else bar["low"]
-    tag = f" · {risk_tag(pick['prob'])[0]}" if pick else ""
-    lines = [f"{'📗 CALL' if up else '📕 PUT'} · {sym}{tag}",
-             f"Why: {sym} {pct:+.1f}% today and holding near the {'high' if up else 'low'}"
-             + (" (HUGE move)" if level == 2 else "")]
     h = mkt.headline(sym)
-    if h:
-        lines.append(f"📰 {h}")
-    lines.append(f"Entry: {'above' if up else 'below'} {short_money(entry)} · Exit: {'under' if up else 'over'} {short_money(mid)}")
-    if pick:
-        exp = datetime.strptime(pick["expiry"], "%Y-%m-%d").date()
-        lines.append(f"Option: {short_money(pick['strike'])} {kind} · exp {exp.strftime('%b')} {exp.day}"
-                     f" · {short_money(pick['premium'])} ({short_money(pick['premium'] * 100)}/contract)"
-                     f" · {pick['prob'] * 100:.0f}% chance")
-    word = verdict(s["iv"], s["hv"])
-    if word[2] is not None:
-        lines.append(f"Options {word[0]} {word[1].lower()} right now")
+    why = (f"{sym} is {'up' if up else 'down'} {abs(pct):.1f}% today and still near its {'high' if up else 'low'}"
+           + (f" ({h})" if h else "") + ".")
     if earn is not None and 0 <= (earn - today).days <= 3:
-        lines.append(f"⚠️ Earnings {when_word(earn, today).lower()}")
-    return "\n".join(lines), kind
+        why += f" ⚠️ Earnings {when_word(earn, today).lower()}."
+    sell = f"if {sym} {'drops under' if up else 'climbs over'} {short_money(mid)}, or when the option doubles."
+    return signal_text(kind, sym, why, pick, sell), kind
 
 
 class _SampleMarket:

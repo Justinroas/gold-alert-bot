@@ -120,8 +120,8 @@ def test_risk_tags():
 
 def test_sample_alerts_cover_each_risk_level():
     texts = ob.sample_alerts(date(2026, 11, 12))
-    assert len(texts) == 6 and "SPY BREAKOUT" in texts[3] and "PANIC DIP" in texts[4] and "SELL" in texts[5]
-    assert "CLEAR TRADE" in texts[0] and "RISKY" in texts[1] and "LOTTERY TICKET" in texts[2]
+    assert len(texts) == 6 and "· SPY" in texts[3] and "RSI-2" in texts[4] and "SELL NOW" in texts[5]
+    assert "Clear trade" in texts[0] and "Risky" in texts[1] and "Lottery ticket" in texts[2]
     assert all(t.startswith("🧪 TEST") for t in texts)
 
 
@@ -145,7 +145,7 @@ def test_orb_signal_call_with_vix_agreeing():
     # candle not finished yet: no signal
     assert ob.orb_signal(spy, vix, 20.0, datetime.combine(d, time(9, 52), tzinfo=ob.NY)) is None
     text = ob.build_orb_alert(sig, None, d)
-    assert text.startswith("📘 SPY BREAKOUT · 📗 CALL")
+    assert text.startswith("📗 BUY CALL · SPY")
 
 
 def test_dip_signal_and_exit():
