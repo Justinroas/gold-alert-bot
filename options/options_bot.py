@@ -532,6 +532,222 @@ def build_news(n, pct=None):
 
 # ---------- market data (Yahoo Finance via yfinance) ----------
 
+# ---------- SEC filings (straight from the companies) and upcoming IPOs ----------
+SEC_UA = os.environ.get("SEC_CONTACT") or "gold-alert-bot (github.com/Justinroas/gold-alert-bot)"
+SEC_MAX_AGE_H = 20  # catch after-close filings at the next morning's first check
+# 8-K "items": what the company is telling the SEC. Only these get an alert.
+SEC_ITEMS = {
+    "2.02": ("released its earnings results", "Earnings move stocks hard. Options lose value fast right after."),
+    "5.02": ("announced a leadership change (CEO, top execs or board)", "Leadership shake-ups mean big swings."),
+    "1.01": ("signed a major deal", "Big deals can move the stock fast."),
+    "1.02": ("ended a major deal", "Losing a big deal can push the stock down."),
+    "2.01": ("finished buying or selling a business", "Buyouts can move the stock fast."),
+    "5.01": ("announced a change in who controls the company", "Ownership changes can move the stock a lot."),
+    "1.05": ("reported a cyber attack", "Hacks usually push a stock down."),
+    "2.05": ("announced layoffs or cost cuts", "Cost cuts can push the stock either way."),
+    "2.06": ("wrote down the value of something it owns", "Write-downs usually push a stock down."),
+    "4.02": ("said old financial reports were wrong", "Restatements are a red flag. Usually bad for the stock."),
+    "3.01": ("got a stock exchange listing warning", "Red flag. Usually bad for the stock."),
+    "8.01": ("shared important company news", "Official news straight from the company. Worth a look."),
+    "7.01": ("shared news with investors", "Official news straight from the company. Worth a look."),
+}
+# Famous private companies: alert the moment any of them files to go public.
+IPO_WATCH = ["anthropic", "openai", "spacex", "stripe", "databricks", "xai", "x.ai", "anduril", "scale ai",
+             "perplexity", "cerebras", "discord", "canva", "revolut", "shein", "chime", "plaid", "ramp",
+             "rippling", "figure ai", "safe superintelligence", "mistral", "kraken", "epic games", "fanatics",
+             "waymo", "starlink", "neuralink", "boring company", "medline", "genesys", "deel", "brex", "gemini",
+             "monzo", "klarna", "reddit", "instacart", "databricks", "groq", "lambda", "crusoe", "wiz", "notion"]
+IPO_BIG = 500e6  # Yahoo IPO calendar: only deals raising $500M+ (or famous names)
+IPO_DAYS = 21
+
+
+def sec_get(url):
+    r = requests.get(url, headers={"User-Agent": SEC_UA, "Accept-Encoding": "gzip"}, timeout=20)
+    r.raise_for_status()
+    return r
+
+
+def sec_ciks(tickers):
+    data = sec_get("https://www.sec.gov/files/company_tickers.json").json()
+    m = {v["ticker"].upper(): (int(v["cik_str"]), v["title"]) for v in data.values()}
+    return {t: m[t] for t in tickers if t in m}
+
+
+def parse_8k(sub, sym, cik):
+    """Recent 8-Ks from a data.sec.gov submissions file: list of dict(acc, sym, when, items, link)."""
+    r = sub.get("filings", {}).get("recent", {})
+    out = []
+    for i, form in enumerate(r.get("form", [])[:40]):
+        if form not in ("8-K", "6-K"):
+            continue
+        acc = r["accessionNumber"][i]
+        items = [x.strip() for x in (r.get("items", [""] * 99)[i] or "").split(",") if x.strip()]
+        when = datetime.strptime(r["acceptanceDateTime"][i][:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=ZoneInfo("UTC"))
+        doc = r.get("primaryDocument", [""] * 99)[i]
+        link = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc.replace('-', '')}/{doc}"
+        out.append(dict(acc=acc, sym=sym, when=when, items=items, link=link))
+    return out
+
+
+def build_filing(f, pct=None):
+    keep = [x for x in f["items"] if x in SEC_ITEMS]
+    if not keep:
+        return None
+    order = list(SEC_ITEMS)
+    keep.sort(key=order.index)
+    what = " and ".join(SEC_ITEMS[x][0] for x in keep[:2])
+    why = SEC_ITEMS[keep[0]][1]
+    if pct is not None:
+        why = f"{f['sym']} is {pct:+.1f}% today. " + why
+    when = f["when"].astimezone(NY).strftime("%-I:%M%p").lower()
+    return "\n".join([f"📄 COMPANY FILING · {f['sym']}", f"{f['sym']} officially {what} ({when}, SEC filing).",
+                      f"Why it matters: {why}", f["link"]])
+
+
+def parse_ipo_feed(xml):
+    """New S-1/F-1 filings (companies applying to go public) from the SEC 'latest filings' feed."""
+    out = []
+    for e in re.findall(r"<entry>(.*?)</entry>", xml, re.S):
+        t = re.search(r"<title>(.*?)</title>", e, re.S)
+        l = re.search(r'<link[^>]*href="([^"]+)"', e)
+        if not t:
+            continue
+        m = re.match(r"\s*(S-1|F-1|S-1/A|F-1/A)\s+-\s+(.*?)\s+\((\d+)\)", t.group(1))
+        if m:
+            out.append(dict(form=m.group(1), name=m.group(2).strip(), cik=m.group(3), link=l.group(1) if l else ""))
+    return out
+
+
+def famous(name):
+    n = " " + re.sub(r"[^a-z0-9. ]", " ", name.lower()) + " "
+    return next((w for w in IPO_WATCH if f" {w} " in n or n.strip().startswith(w + " ")), None)
+
+
+def build_ipo_filing(f):
+    amend = f["form"].endswith("/A")
+    name = f["name"].title() if f["name"].isupper() else f["name"]
+    what = "updated its paperwork to go public (usually means the IPO is getting close)" if amend \
+        else "officially filed to go public (IPO)"
+    return "\n".join([f"🚀 IPO NEWS · {name}", f"{name} {what}.",
+                      "Why it matters: Big IPOs bring hype. Related stocks can move, and the new stock gets"
+                      " options a few days after it starts trading.", f["link"]])
+
+
+def ipo_rows(df, today, days=IPO_DAYS):
+    """Upcoming IPOs from Yahoo's calendar: big ones or famous names only."""
+    out = []
+    if df is None or len(df) == 0:
+        return out
+    df = df.reset_index()
+    cols = {c.lower().replace(" ", "").replace("_", ""): c for c in df.columns}
+    g = lambda r, *names: next((r[cols[n]] for n in names if n in cols and r[cols[n]] == r[cols[n]]), None)
+    for _, r in df.iterrows():
+        name = str(g(r, "company", "companyname", "name") or "")
+        sym = str(g(r, "symbol", "ticker") or "")
+        d = g(r, "date", "startdatetime", "ipodate")
+        try:
+            d = d.date() if hasattr(d, "date") else datetime.fromisoformat(str(d)[:10]).date()
+        except Exception:
+            continue
+        if not (today <= d <= today + timedelta(days=days)):
+            continue
+        lo, hi = g(r, "pricefrom", "pricelow"), g(r, "priceto", "pricehigh")
+        price = g(r, "price") or hi or lo
+        shares = g(r, "shares")
+        try:
+            size = float(price) * float(shares)
+        except Exception:
+            size = None
+        if not (famous(name) or (size and size >= IPO_BIG)):
+            continue
+        out.append(dict(name=name, sym=sym, date=d, lo=lo, hi=hi, size=size))
+    return sorted(out, key=lambda x: x["date"])
+
+
+def build_ipo_upcoming(x):
+    rng = ""
+    try:
+        rng = f", priced around ${float(x['lo']):.0f}-${float(x['hi']):.0f} a share" if x["lo"] and x["hi"] else ""
+    except Exception:
+        pass
+    size = f", raising about ${x['size'] / 1e9:.1f}B" if x["size"] and x["size"] >= 1e9 else \
+        (f", raising about ${x['size'] / 1e6:.0f}M" if x["size"] else "")
+    tick = f" ({x['sym']})" if x["sym"] and x["sym"] != "nan" else ""
+    return "\n".join([f"🚀 UPCOMING IPO · {x['name']}{tick}",
+                      f"Expected to start trading {nice_date(x['date'])}{rng}{size}.",
+                      "Why it matters: Big IPOs bring hype and big swings. Options on it usually show up a few"
+                      " days after it starts trading."])
+
+
+def check_sec(state, watch, now, say, mkt=None, force=False):
+    """Company filings for our stocks + new IPO filings from famous companies."""
+    seen = state.setdefault("sec_seen", [])
+    first = not seen  # first ever check: just remember what's already out there
+    max_age = timedelta(days=4) if force else timedelta(hours=SEC_MAX_AGE_H)
+    sent_any = 0
+    for sym, (cik, _) in sec_ciks([w for w in watch if w not in ETFS]).items():
+        try:
+            sub = sec_get(f"https://data.sec.gov/submissions/CIK{cik:010d}.json").json()
+        except Exception as e:
+            print(f"SEC {sym}: {e}")
+            continue
+        for f in parse_8k(sub, sym, cik):
+            if f["acc"] in seen and not force:
+                continue
+            if f["acc"] not in seen:
+                seen.append(f["acc"])
+            if first and not force or now - f["when"] > max_age:
+                continue
+            pct = None
+            try:
+                d = mkt.daily(sym) if mkt else None
+                if d and d[-1][0] == now.date():
+                    pct = (d[-1][1] / d[-2][1] - 1) * 100
+            except Exception:
+                pass
+            text = build_filing(f, pct)
+            print(f"SEC {sym} {f['acc']} items={f['items']} -> {'alert' if text else 'skip'}")
+            if text:
+                say(text)
+                sent_any += 1
+    try:
+        xml = ""
+        for form in ("S-1", "F-1"):
+            xml += sec_get("https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type="
+                           f"{form}&company=&dateb=&owner=include&start=0&count=100&output=atom").text
+        feed = parse_ipo_feed(xml)
+        print(f"SEC IPO feed: {len(feed)} filings, e.g. {[f['name'] for f in feed[:5]]}")
+        for f in feed:
+            key = f"ipo:{f['cik']}:{f['form']}:{f['link'][-40:]}"
+            if key in seen:
+                continue
+            seen.append(key)
+            if famous(f["name"]) and not first:
+                say(build_ipo_filing(f))
+                sent_any += 1
+    except Exception as e:
+        print(f"SEC IPO feed failed: {e}")
+    state["sec_seen"] = seen[-600:]
+    return sent_any
+
+
+def check_ipo_calendar(state, today, say, force=False):
+    import yfinance as yf
+    df = yf.Calendars(start=today, end=today + timedelta(days=IPO_DAYS)).get_ipo_info_calendar(limit=100)
+    print(f"IPO calendar columns: {list(df.columns) if df is not None else None}, rows {0 if df is None else len(df)}")
+    rows = ipo_rows(df, today)
+    told = state.setdefault("ipo_told", {})
+    for x in rows:
+        k = (x["sym"] or x["name"]).lower()
+        if told.get(k) == x["date"].isoformat() and not force:
+            continue
+        told[k] = x["date"].isoformat()
+        say(build_ipo_upcoming(x))
+    for k in [k for k, d in told.items() if d < (today - timedelta(days=7)).isoformat()]:
+        del told[k]
+    return rows
+
+
 class Market:
     def __init__(self):
         import yfinance as yf
@@ -971,6 +1187,19 @@ def main():
                 state["news_seen"] = {day: sorted(seen | {n["title"].lower() for n in pick})}
         except Exception as e:
             print(f"News roundup failed: {e}")
+
+    if FORCE in ("sec", "all") or weekday:
+        say = lambda t: send(t, None if quiet else chat_id, state)
+        try:
+            check_sec(state, watch, now, say, mkt, force=FORCE == "sec")
+        except Exception as e:
+            print(f"SEC check failed: {e}")
+        if FORCE in ("sec", "all") or state.get("ipo_day") != day:
+            state["ipo_day"] = day
+            try:
+                check_ipo_calendar(state, today, say, force=FORCE == "sec")
+            except Exception as e:
+                print(f"IPO calendar failed: {e}")
 
     if FORCE in ("dip", "all") or (weekday and DIP_CHECK[0] <= now.time() <= DIP_CHECK[1]
                                     and state.get("dip_day") != day):
