@@ -450,7 +450,7 @@ def build_brief(mkt, watchlist, today):
     return "\n\n".join(parts)
 
 
-def build_move_alert(mkt, s, pct, level, today, earn=None):
+def build_move_alert(mkt, s, pct, level, today, earn=None, pick=None):
     sym, price = s["sym"], s["price"]
     bar = mkt.bars(sym)[-1]
     up = pct > 0
@@ -465,7 +465,7 @@ def build_move_alert(mkt, s, pct, level, today, earn=None):
         parts.append(f"📰 News: {h}")
     parts.append(f"🎯 {label}\n{why}")
     if kind:
-        pick = budget_pick(mkt, sym, kind, price, today)
+        pick = pick or budget_pick(mkt, sym, kind, price, today)
         if pick:
             tag, meaning = risk_tag(pick["prob"])
             parts[0] += f"\n{tag}: {meaning}"
@@ -476,6 +476,45 @@ def build_move_alert(mkt, s, pct, level, today, earn=None):
                      " Option prices drop right after earnings, even if you guess right.")
     parts.append("Alerts only, not advice. Only risk money you're OK losing.")
     return "\n\n".join(parts), kind
+
+
+class _SampleMarket:
+    """Made-up prices for example alerts."""
+    def __init__(self, bars, headline):
+        self._bars, self._headline = bars, headline
+
+    def bars(self, sym):
+        return self._bars
+
+    def headline(self, sym):
+        return self._headline
+
+
+def sample_alerts(today):
+    """One example of each risk level, built exactly like real alerts but with made-up prices."""
+    out = []
+    examples = [
+        # sym, prev, price, high, low, kind, strike, premium, days, iv, hv, headline
+        ("F", 10.95, 11.40, 11.45, 10.98, "call", 11.5, 0.38, 22, 0.37, 0.33,
+         "Ford jumps after strong truck sales"),
+        ("SPY", 760.00, 746.00, 758.00, 745.20, "put", 740, 0.98, 8, 0.15, 0.18,
+         "Stocks slide after hot inflation report"),
+        ("AMD", 552.90, 583.00, 590.00, 554.90, "call", 720, 0.92, 8, 0.65, 0.96,
+         "AMD jumps on new AI chip deal"),
+    ]
+    for sym, prev, price, high, low, kind, strike, prem, days, iv, hv, head in examples:
+        exp = (today + timedelta(days=days)).isoformat()
+        years = days / 365
+        opt_iv = implied_vol(kind, prem, price, strike, years) or iv
+        be = strike + prem if kind == "call" else strike - prem
+        pick = dict(strike=strike, premium=prem, expiry=exp, prob=prob_profit(kind, price, be, years, opt_iv))
+        bars = [dict(date=today, open=prev, high=high, low=low, close=price)]
+        s = dict(sym=sym, price=price, iv=iv, hv=hv, days=[(today - timedelta(days=1), prev), (today, price)])
+        pct = (price / prev - 1) * 100
+        lvl = move_level(pct, MOVE_PCT_ETF if sym in ETFS else MOVE_PCT_STOCK) or 1
+        text, _ = build_move_alert(_SampleMarket(bars, head), s, pct, lvl, today, pick=pick)
+        out.append("🧪 TEST ALERT (made-up prices, not a real trade)\n\n" + text)
+    return out
 
 
 # ---------- Telegram ----------
@@ -584,6 +623,12 @@ def main():
     day = today.isoformat()
     for k in [k for k in sent if not k.startswith(day)]:
         del sent[k]
+
+    if FORCE == "samples":
+        for text in sample_alerts(today):
+            chat_id = send(text, chat_id, state) or chat_id
+        save_state(state)
+        return
 
     if FORCE in ("brief", "all") or (weekday and now.time() >= BRIEF_START and state.get("brief") != day
                                      and now.time() < SCAN_END):
