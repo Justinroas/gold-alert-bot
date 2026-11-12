@@ -436,6 +436,56 @@ def build_dip_exit(sym, price, entry_price, reason):
     return f"⏰ CLOSE POSITION · {sym} call\nNo bounce after {DIP_MAX_DAYS} days ({sym} {chg:+.1f}%). Get out before it loses more."
 
 
+# ---------- News roundups ----------
+NEWS_TIMES = [(time(12, 0), time(12, 30)), (time(15, 25), time(15, 39))]
+NEWS_COUNT = 5
+NEWS_MAX_AGE_H = 12
+
+
+def parse_news(it, sym):
+    """Handles both shapes Yahoo has used for news items."""
+    c = it.get("content", it)
+    title = c.get("title")
+    if not title:
+        return None
+    src = (c.get("provider") or {}).get("displayName") or c.get("publisher") or ""
+    link = ((c.get("canonicalUrl") or {}).get("url") or (c.get("clickThroughUrl") or {}).get("url")
+            or c.get("link") or "")
+    ts = None
+    if c.get("pubDate"):
+        try:
+            ts = datetime.fromisoformat(c["pubDate"].replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            ts = None
+    elif c.get("providerPublishTime"):
+        ts = float(c["providerPublishTime"])
+    return dict(title=title.strip(), source=src, link=link, ts=ts, sym=sym)
+
+
+def pick_news(items, seen, now_ts, count=NEWS_COUNT):
+    """Newest headlines first, no repeats (same title seen today), market-wide ones first on ties."""
+    out, titles = [], set()
+    fresh = [n for n in items if n["ts"] and now_ts - n["ts"] <= NEWS_MAX_AGE_H * 3600]
+    for n in sorted(fresh, key=lambda n: -n["ts"]):
+        key = n["title"].lower()
+        if key in titles or key in seen:
+            continue
+        titles.add(key)
+        out.append(n)
+        if len(out) == count:
+            break
+    return out
+
+
+def build_news(items, now):
+    lines = [f"📰 MARKET NEWS · {now.strftime('%-I:%M%p').lower()}"]
+    for n in items:
+        tag = "" if n["sym"] in ("SPY", "QQQ", "^GSPC") else f"[{n['sym']}] "
+        src = f" ({n['source']})" if n["source"] else ""
+        lines.append(f"• {tag}{n['title']}{src}" + (f"\n  {n['link']}" if n["link"] else ""))
+    return "\n".join(lines)
+
+
 # ---------- market data (Yahoo Finance via yfinance) ----------
 
 class Market:
@@ -483,6 +533,14 @@ class Market:
         ds = [d if isinstance(d, date) else d.date() for d in ds]
         ds = [d for d in ds if d >= today]
         return min(ds) if ds else None
+
+    def news(self, sym):
+        """Recent headlines for a ticker: list of dict(title, source, link, ts)."""
+        try:
+            items = self.t(sym).news or []
+        except Exception:
+            return []
+        return [n for n in (parse_news(it, sym) for it in items) if n]
 
     def headline(self, sym):
         try:
@@ -613,6 +671,8 @@ The 3 strategies:
 1. Big move: a stock jumps or drops 3%+ and is holding it.
 2. SPY breakout (9:50-11:30am): SPY breaks its first-15-minute range and the fear meter agrees.
 3. Panic dip (3:45pm): a good stock got dumped while the market is scared. Usually bounces in ~3 days.
+
+📰 News roundups at 12pm and 3:30pm: the top 5 market headlines.
 
 VIX = the market's fear meter. Under 15 calm, 20+ scared, 30+ panic.
 RSI-2 = how beaten up a stock is over 2 days (0-100). Under 10 = stretched way down, likely to snap back.
@@ -840,6 +900,21 @@ def main():
                     sent[key] = dict(lvl=max(lvl, had.get("lvl", 0)), setup=bool(kind) or had.get("setup", False))
             except Exception as e:
                 print(f"{sym}: scan failed: {e}")
+    slot = next((i for i, (a, b) in enumerate(NEWS_TIMES) if a <= now.time() <= b), None)
+    if FORCE in ("news", "all") or (weekday and slot is not None and state.get("news_slot") != f"{day}:{slot}"):
+        state["news_slot"] = f"{day}:{slot}"
+        try:
+            items = []
+            for sym in ["SPY", "QQQ"] + [w for w in watch if w not in ("SPY", "QQQ")]:
+                items += mkt.news(sym)
+            seen = set(state.get("news_seen", {}).get(day, []))
+            pick = pick_news(items, seen, now.timestamp())
+            if pick:
+                chat_id = send(build_news(pick, now), None if quiet else chat_id, state) or chat_id
+                state["news_seen"] = {day: sorted(seen | {n["title"].lower() for n in pick})}
+        except Exception as e:
+            print(f"News roundup failed: {e}")
+
     if FORCE in ("dip", "all") or (weekday and DIP_CHECK[0] <= now.time() <= DIP_CHECK[1]
                                     and state.get("dip_day") != day):
         state["dip_day"] = day
