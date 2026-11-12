@@ -424,7 +424,11 @@ def find_chat_id(state):
     if not TOKEN():
         return None
     gold = os.environ.get("GOLD_CHAT_ID", "")
-    for u in reversed(tg("getUpdates").get("result", [])):
+    me = tg("getMe").get("result", {}).get("username")
+    updates = tg("getUpdates").get("result", [])
+    print(f"Bot @{me} (own options key: {'yes' if os.environ.get('OPTIONS_TELEGRAM_BOT_TOKEN') else 'NO'}),"
+          f" {len(updates)} new messages: {[(u.get('message') or {}).get('chat', {}).get('type') for u in updates]}")
+    for u in reversed(updates):
         m = u.get("message") or {}
         chat = str(m.get("chat", {}).get("id", ""))
         if chat and chat != gold and (m.get("text") or "").strip().lower().startswith("/options"):
@@ -485,12 +489,15 @@ def main():
     now = datetime.now(NY)
     today = now.date()
     state = load_state()
+    # Fresh memory (first run on main, or the cache was cleared): record what already
+    # happened today without sending it again, so nobody gets repeat alerts.
+    quiet = not state and not FORCE
     chat_id = find_chat_id(state)
     if not chat_id and not DRY_RUN:
         print("No chat yet: add the bot to the Options Alerts group and send /options there")
         save_state(state)
         return
-    if state.pop("new_chat", False):
+    if state.pop("new_chat", False) and not quiet:
         send("✅ Options alerts are ON for this chat.\nEvery weekday: a morning brief at 8:45am New York,"
              " plus alerts for big moves and big bets on the watchlist.\nAlerts only, not advice.", chat_id, state)
     weekday = today.weekday() < 5
@@ -503,7 +510,7 @@ def main():
 
     if FORCE in ("brief", "all") or (weekday and now.time() >= BRIEF_START and state.get("brief") != day
                                      and now.time() < SCAN_END):
-        chat_id = send(build_brief(mkt, watch, today), chat_id, state)
+        chat_id = send(build_brief(mkt, watch, today), None if quiet else chat_id, state) or chat_id
         state["brief"] = day
         save_state(state)
 
@@ -520,14 +527,14 @@ def main():
                 print(f"{sym}: {pct:+.2f}% level {lvl}")
                 if lvl and (sent.get(key, 0) < lvl or FORCE):
                     s = snapshot(mkt, sym, today)
-                    chat_id = send(build_move_alert(mkt, s, pct, lvl, today), chat_id, state)
+                    chat_id = send(build_move_alert(mkt, s, pct, lvl, today), None if quiet else chat_id, state) or chat_id
                     sent[key] = lvl
                 if do_uoa:
                     bets = find_big_bets(mkt, sym, days[-1][1], today, mkt.expiries(sym))
                     for b in sorted(bets, key=lambda b: -b["dollars"])[:1]:
                         k = f"{day}:bet:{sym}:{b['kind']}:{b['strike']}:{b['expiry']}"
                         if k not in sent or FORCE:
-                            chat_id = send(build_big_bet_alert(b, days[-1][1]), chat_id, state)
+                            chat_id = send(build_big_bet_alert(b, days[-1][1]), None if quiet else chat_id, state) or chat_id
                             sent[k] = 1
             except Exception as e:
                 print(f"{sym}: scan failed: {e}")
