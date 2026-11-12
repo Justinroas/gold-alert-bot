@@ -658,6 +658,9 @@ def ipo_rows(df, today, days=IPO_DAYS):
             size = float(price) * float(shares)
         except Exception:
             size = None
+        print(f"IPO calendar: {name} ({sym}) {d} size {size}")
+        if "withdraw" in str(g(r, "action") or "").lower():
+            continue
         if not (famous(name) or (size and size >= IPO_BIG)):
             continue
         out.append(dict(name=name, sym=sym, date=d, lo=lo, hi=hi, size=size))
