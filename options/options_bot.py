@@ -298,6 +298,63 @@ def budget_text(sym, kind, price, pick, today, budget=BUDGET):
     return text + "\n  Simple rule: sell if the option doubles, get out if it loses half."
 
 
+# ---------- SPY strategy: 15-min opening range breakout, VIX must agree ----------
+# Replay (options/backtest_spy.py): last 60 days, 15-min range + VIX agrees: 54% win, +0.30R per trade
+# (VIX disagrees: 33%, -0.19R). 2 years of 1-hour candles: VIX 20+ and agrees: 60-74% win.
+ORB_MINUTES = 15
+ORB_LAST_SIGNAL = time(11, 30)
+ORB_BAR = timedelta(minutes=5)
+
+
+def orb_signal(spy_bars, vix_bars, vix_prev_close, now):
+    """spy_bars / vix_bars: today's 5-min candles as dicts (start, high, low, close), oldest first.
+    Returns the day's FIRST breakout as a dict (with agree=True/False), or None if none yet."""
+    day_open = datetime.combine(now.date(), time(9, 30), tzinfo=NY)
+    or_end = day_open + timedelta(minutes=ORB_MINUTES)
+    rng = [b for b in spy_bars if day_open <= b["start"] < or_end]
+    if len(rng) < ORB_MINUTES // 5:
+        return None
+    hi, lo = max(b["high"] for b in rng), min(b["low"] for b in rng)
+    vix_at = {b["start"]: b["close"] for b in vix_bars}
+    for b in spy_bars:
+        end = b["start"] + ORB_BAR
+        if b["start"] < or_end or end > now:
+            continue
+        if end.astimezone(NY).time() > ORB_LAST_SIGNAL:
+            return None
+        side = "call" if b["close"] > hi else "put" if b["close"] < lo else None
+        if not side:
+            continue
+        earlier = [t for t in vix_at if t <= b["start"]]
+        vix = vix_at[max(earlier)] if earlier else None
+        agree = (vix is not None and vix_prev_close is not None
+                 and ((side == "call" and vix < vix_prev_close) or (side == "put" and vix > vix_prev_close)))
+        mid, height = (hi + lo) / 2, hi - lo
+        return dict(side=side, price=b["close"], hi=hi, lo=lo, stop=mid,
+                    target=b["close"] + height if side == "call" else b["close"] - height,
+                    vix=vix, vix_prev=vix_prev_close, agree=agree, at=end)
+    return None
+
+
+def build_orb_alert(sig, pick, today):
+    up = sig["side"] == "call"
+    vix_word = "falling (fear dropping)" if up else "rising (fear growing)"
+    tag = f" · {risk_tag(pick['prob'])[0]}" if pick else ""
+    lines = [f"📘 SPY BREAKOUT · {'📗 CALL' if up else '📕 PUT'}{tag}",
+             f"Why: SPY broke {'above' if up else 'below'} its first-15-min {'high' if up else 'low'}"
+             f" ({short_money(sig['hi'] if up else sig['lo'])}) and VIX is {vix_word}: {sig['vix']:.1f} vs {sig['vix_prev']:.1f} yesterday ✅",
+             f"Entry: ~{short_money(sig['price'])} · Stop: {'under' if up else 'over'} {short_money(sig['stop'])}"
+             f" · Target: {short_money(sig['target'])}"]
+    if sig["vix"] >= 20:
+        lines.append("⭐ VIX 20+: big-move day, this setup has worked best on days like this")
+    if pick:
+        exp = datetime.strptime(pick["expiry"], "%Y-%m-%d").date()
+        lines.append(f"Option: {short_money(pick['strike'])} {sig['side']} · exp {exp.strftime('%b')} {exp.day}"
+                     f" · {short_money(pick['premium'])} ({short_money(pick['premium'] * 100)}/contract)"
+                     f" · {pick['prob'] * 100:.0f}% chance")
+    return "\n".join(lines)
+
+
 # ---------- market data (Yahoo Finance via yfinance) ----------
 
 class Market:
@@ -322,6 +379,12 @@ class Market:
 
     def daily(self, sym):
         return [(b["date"], b["close"]) for b in self.bars(sym)]
+
+    def intraday(self, sym):
+        """Today's 5-minute candles."""
+        df = self.t(sym).history(period="1d", interval="5m", auto_adjust=False).dropna(subset=["Close"])
+        return [dict(start=ts.to_pydatetime().astimezone(NY), high=float(r.High), low=float(r.Low),
+                     close=float(r.Close)) for ts, r in df.iterrows()]
 
     def chain(self, sym, expiry):
         ch = self.t(sym).option_chain(expiry)
@@ -504,6 +567,10 @@ def sample_alerts(today):
         lvl = move_level(pct, MOVE_PCT_ETF if sym in ETFS else MOVE_PCT_STOCK) or 1
         text, _ = build_move_alert(_SampleMarket(bars, head), s, pct, lvl, today, pick=pick)
         out.append("🧪 TEST (made-up prices)\n" + text)
+    sig = dict(side="call", price=748.10, hi=747.60, lo=744.90, stop=746.25, target=750.80,
+               vix=21.4, vix_prev=22.6, agree=True)
+    pick = dict(strike=760, premium=0.95, expiry=(today + timedelta(days=8)).isoformat(), prob=0.17)
+    out.append("🧪 TEST (made-up prices)\n" + build_orb_alert(sig, pick, today))
     return out
 
 
@@ -625,6 +692,26 @@ def main():
         chat_id = send(build_brief(mkt, watch, today), None if quiet else chat_id, state) or chat_id
         state["brief"] = day
         save_state(state)
+
+    if (FORCE in ("scan", "all") or (weekday and SCAN_START <= now.time() <= time(11, 40))) \
+            and state.get("orb") != day:
+        try:
+            spy = mkt.intraday("SPY")
+            vix_daily = mkt.daily("^VIX")
+            vix_prev = vix_daily[-2][1] if vix_daily and vix_daily[-1][0] == today else vix_daily[-1][1]
+            sig = orb_signal(spy, mkt.intraday("^VIX"), vix_prev, now)
+            print(f"SPY breakout check: {sig}")
+            if sig:
+                state["orb"] = day  # only the day's first breakout counts (that's what was tested)
+                if sig["agree"]:
+                    pick = budget_pick(mkt, "SPY", sig["side"], sig["price"], today)
+                    chat_id = send(build_orb_alert(sig, pick, today), None if quiet else chat_id, state) or chat_id
+                else:
+                    print("SPY broke out but VIX disagrees: skip the day")
+            elif now.time() > ORB_LAST_SIGNAL:
+                state["orb"] = day
+        except Exception as e:
+            print(f"SPY breakout check failed: {e}")
 
     if FORCE in ("scan", "all") or (weekday and SCAN_START <= now.time() <= SCAN_END):
         for sym in watch:
