@@ -101,11 +101,11 @@ class FakeMkt:
 
 
 def test_budget_pick_fits_budget_and_window():
-    pick = ob.budget_pick(FakeMkt(), "XYZ", "call", 100, date(2026, 11, 12), budget=100)
-    assert pick and pick["premium"] * 100 <= 100
+    pick = ob.budget_pick(FakeMkt(), "XYZ", "call", 100, date(2026, 11, 12), budget=300)
+    assert pick and pick["premium"] * 100 <= 300
     assert pick["expiry"] in ("2026-11-27", "2026-12-18")  # 7-45 days only
-    t = ob.budget_text("XYZ", "call", 100, pick, date(2026, 11, 12))
-    assert "YOUR $100 PICK" in t and "Chance it pays off" in t
+    t = ob.budget_text("XYZ", "call", 100, pick, date(2026, 11, 12), budget=300)
+    assert "YOUR $300 PICK" in t and "Chance it pays off" in t
     assert "PICK: none" in ob.budget_text("XYZ", "call", 100, None, date(2026, 11, 12))
 
 
