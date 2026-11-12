@@ -599,6 +599,28 @@ def build_move_alert(mkt, s, pct, level, today, earn=None, pick=None):
     return signal_text(kind, sym, why, pick, sell), kind
 
 
+GUIDE = """📌 HOW TO READ THESE ALERTS
+
+📗 BUY CALL = bet the stock goes UP
+📕 BUY PUT = bet the stock goes DOWN
+💰 SELL NOW = take your profit / get out
+
+Buy: which option to buy. Prices are per share, so 1 contract = price x 100.
+Sell: when to get out. Always follow it.
+Risk: 🟢 Clear trade · 🟡 Risky · 🔴 Lottery ticket (small bet only)
+
+The 3 strategies:
+1. Big move: a stock jumps or drops 3%+ and is holding it.
+2. SPY breakout (9:50-11:30am): SPY breaks its first-15-minute range and the fear meter agrees.
+3. Panic dip (3:45pm): a good stock got dumped while the market is scared. Usually bounces in ~3 days.
+
+VIX = the market's fear meter. Under 15 calm, 20+ scared, 30+ panic.
+RSI-2 = how beaten up a stock is over 2 days (0-100). Under 10 = stretched way down, likely to snap back.
+
+☀️ 8:45am brief: big events coming up, and whether options are 🟢 cheap or 🔴 pricey.
+Alerts only, not financial advice. Only bet money you're OK losing."""
+
+
 class _SampleMarket:
     """Made-up prices for example alerts."""
     def __init__(self, bars, headline):
@@ -751,6 +773,11 @@ def main():
     day = today.isoformat()
     for k in [k for k in sent if not k.startswith(day)]:
         del sent[k]
+
+    if FORCE == "guide":
+        send(GUIDE, chat_id, state)
+        save_state(state)
+        return
 
     if FORCE == "samples":
         for text in sample_alerts(today):
