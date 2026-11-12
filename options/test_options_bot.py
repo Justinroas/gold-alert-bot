@@ -159,3 +159,24 @@ def test_dip_signal_and_exit():
     assert ob.dip_exit(dumped + [up[-1] * 1.01], 1) == "bounce"
     assert ob.dip_exit(dumped + [up[-1] * 0.95], 1) is None
     assert ob.dip_exit(dumped + [up[-1] * 0.95], 10) == "time"
+
+
+def test_news_parse_pick_and_format():
+    new_style = {"content": {"title": "Stocks rally on Fed hopes", "pubDate": "2026-11-12T15:00:00Z",
+                             "provider": {"displayName": "Reuters"}, "canonicalUrl": {"url": "https://x.test/a"}}}
+    old_style = {"title": "Nvidia slides as CEO Huang exits", "publisher": "CNBC", "link": "https://x.test/b",
+                 "providerPublishTime": 1794490000}
+    junk = {"title": "3 IRA Moves to Make Now", "publisher": "Fool", "providerPublishTime": 1794496000}
+    offtopic = {"title": "Pimco CEO warns on AI borrowing", "publisher": "Fool", "providerPublishTime": 1794496000}
+    a, b = ob.parse_news(new_style, "SPY"), ob.parse_news(old_style, "NVDA")
+    j, o = ob.parse_news(junk, "NVDA"), ob.parse_news(offtopic, "AMZN")
+    assert a["source"] == "Reuters" and a["link"] == "https://x.test/a" and a["ts"]
+    assert b["source"] == "CNBC" and b["ts"] == 1794490000
+    now = a["ts"] + 600
+    picked = ob.pick_news([a, b, dict(a), j, o], set(), now)
+    assert [n["title"] for n in picked] == ["Stocks rally on Fed hopes", "Nvidia slides as CEO Huang exits"]
+    assert ob.pick_news([a], {"stocks rally on fed hopes"}, now) == []   # already sent today
+    assert ob.pick_news([a], set(), a["ts"] + 13 * 3600) == []           # too old
+    text = ob.build_news(b, -5.9)
+    assert text.startswith("📰 MARKET NEWS · NVDA") and "Why it matters: NVDA is -5.9% today. A leadership" in text
+    assert "Fed and interest-rate news" in ob.build_news(a, 0.4)
