@@ -3,6 +3,11 @@ name: Options strategy replay
 on:
   workflow_dispatch:
     inputs:
+      script:
+        description: "Which replay"
+        type: choice
+        options: ["breakout", "daily"]
+        default: "breakout"
       tickers:
         description: "Comma-separated tickers to compare (empty = detailed SPY report)"
         type: string
@@ -17,6 +22,6 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r options/requirements.txt
-      - run: python options/backtest_spy.py
+      - run: python options/${{ inputs.script == 'daily' && 'backtest_daily.py' || 'backtest_spy.py' }}
         env:
           TICKERS: ${{ inputs.tickers }}
