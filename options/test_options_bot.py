@@ -180,3 +180,29 @@ def test_news_parse_pick_and_format():
     text = ob.build_news(b, -5.9)
     assert text.startswith("📰 MARKET NEWS · NVDA") and "Why it matters: NVDA is -5.9% today. A leadership" in text
     assert "Fed and interest-rate news" in ob.build_news(a, 0.4)
+
+
+def test_sec_filings_and_ipos():
+    sub = {"filings": {"recent": {
+        "form": ["8-K", "4", "8-K"], "accessionNumber": ["0001-26-000001", "x", "0001-26-000002"],
+        "items": ["5.02,9.01", "", "5.07"], "acceptanceDateTime": ["2026-11-12T13:05:00.000Z", "", "2026-11-11T20:00:00.000Z"],
+        "primaryDocument": ["a.htm", "", "b.htm"]}}}
+    fs = ob.parse_8k(sub, "NVDA", 1045810)
+    assert [f["acc"] for f in fs] == ["0001-26-000001", "0001-26-000002"]
+    text = ob.build_filing(fs[0], -5.7)
+    assert text.startswith("📄 COMPANY FILING · NVDA") and "leadership change" in text and "-5.7%" in text
+    assert "/1045810/000126000001/a.htm" in text
+    assert ob.build_filing(fs[1]) is None  # shareholder vote results: not worth an alert
+    xml = ('<feed><entry><title>S-1 - Anthropic PBC (0001234567) (Filer)</title><link href="https://sec.test/1"/></entry>'
+           '<entry><title>S-1/A - Tiny Shell Co (0007654321) (Filer)</title><link href="https://sec.test/2"/></entry></feed>')
+    feed = ob.parse_ipo_feed(xml)
+    assert [f["name"] for f in feed] == ["Anthropic PBC", "Tiny Shell Co"]
+    assert ob.famous("Anthropic PBC") == "anthropic" and ob.famous("Tiny Shell Co") is None
+    assert ob.famous("Scale AI, Inc.") == "scale ai" and ob.famous("Rampart Mining") is None
+    assert ob.build_ipo_filing(feed[0]).startswith("🚀 IPO NEWS · Anthropic PBC")
+    import pandas as pd
+    df = pd.DataFrame([dict(Symbol="BIG", Company="Big Co", Date="2026-11-20", **{"Price From": 20, "Price To": 24, "Shares": 50e6}),
+                       dict(Symbol="SML", Company="Small Co", Date="2026-11-20", **{"Price From": 4, "Price To": 5, "Shares": 1e6})])
+    rows = ob.ipo_rows(df, date(2026, 11, 12))
+    assert [r["sym"] for r in rows] == ["BIG"]
+    assert "raising about $1.2B" in ob.build_ipo_upcoming(rows[0]) and "Nov 20" in ob.build_ipo_upcoming(rows[0])
