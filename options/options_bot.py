@@ -424,7 +424,11 @@ def find_chat_id(state):
     if not TOKEN():
         return None
     gold = os.environ.get("GOLD_CHAT_ID", "")
-    for u in reversed(tg("getUpdates").get("result", [])):
+    me = tg("getMe").get("result", {}).get("username")
+    updates = tg("getUpdates").get("result", [])
+    print(f"Bot @{me} (own options key: {'yes' if os.environ.get('OPTIONS_TELEGRAM_BOT_TOKEN') else 'NO'}),"
+          f" {len(updates)} new messages: {[(u.get('message') or {}).get('chat', {}).get('type') for u in updates]}")
+    for u in reversed(updates):
         m = u.get("message") or {}
         chat = str(m.get("chat", {}).get("id", ""))
         if chat and chat != gold and (m.get("text") or "").strip().lower().startswith("/options"):
