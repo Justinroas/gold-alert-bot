@@ -1,6 +1,6 @@
 """Options alert bot (alerts only, never trades).
 
-What it sends to Telegram (private chat with the bot, NOT the cousins' gold group):
+What it sends to Telegram (its own "Options Alerts" group, separate from the gold group):
 1. Morning brief (once each weekday, after 8:45am New York):
    - big events coming up (earnings for your watchlist, Fed meetings, inflation and jobs reports)
    - how much the options market expects each upcoming earnings to move the stock
@@ -411,32 +411,45 @@ def tg(method, **params):
 
 
 def find_chat_id(state):
-    """Private chat with the bot where someone sent /options. Never the cousins' gold group."""
+    """The chat where someone sent /options: the "Options Alerts" group (or a private chat).
+    Never the gold group, so the two bots' alerts stay separate."""
     cid = os.environ.get("OPTIONS_TELEGRAM_CHAT_ID") or state.get("chat_id")
     if cid:
         return cid
     if not os.environ.get("TELEGRAM_BOT_TOKEN"):
         return None
+    gold = os.environ.get("GOLD_CHAT_ID", "")
     for u in reversed(tg("getUpdates").get("result", [])):
         m = u.get("message") or {}
-        if m.get("chat", {}).get("type") == "private" and (m.get("text") or "").strip().lower().startswith("/options"):
-            state["chat_id"] = str(m["chat"]["id"])
+        chat = str(m.get("chat", {}).get("id", ""))
+        if chat and chat != gold and (m.get("text") or "").strip().lower().startswith("/options"):
+            state["chat_id"] = chat
             state["new_chat"] = True
-            return state["chat_id"]
+            return chat
     return None
 
 
-def send(text, chat_id):
+def send(text, chat_id, state=None):
     print(text + "\n" + "-" * 40)
     if DRY_RUN or not chat_id:
-        return
+        return chat_id
     while text:
         chunk, text = text[:4000], text[4000:]
         if text:  # split at a line break
             cut = chunk.rfind("\n")
             if cut > 0:
                 chunk, text = chunk[:cut], chunk[cut + 1:] + text
-        tg("sendMessage", chat_id=chat_id, text=chunk, disable_web_page_preview="true")
+        r = requests.post(f"https://api.telegram.org/bot{os.environ['TELEGRAM_BOT_TOKEN']}/sendMessage",
+                          data=dict(chat_id=chat_id, text=chunk, disable_web_page_preview="true"), timeout=30)
+        new_id = (r.json().get("parameters") or {}).get("migrate_to_chat_id") if r.status_code == 400 else None
+        if new_id:  # Telegram upgraded the group to a supergroup: new id, send again
+            chat_id = str(new_id)
+            if state is not None:
+                state["chat_id"] = chat_id
+            r = requests.post(f"https://api.telegram.org/bot{os.environ['TELEGRAM_BOT_TOKEN']}/sendMessage",
+                              data=dict(chat_id=chat_id, text=chunk, disable_web_page_preview="true"), timeout=30)
+        r.raise_for_status()
+    return chat_id
 
 
 # ---------- main ----------
@@ -469,12 +482,12 @@ def main():
     state = load_state()
     chat_id = find_chat_id(state)
     if not chat_id and not DRY_RUN:
-        print("No chat yet: open Telegram, message the bot and send /options")
+        print("No chat yet: add the bot to the Options Alerts group and send /options there")
         save_state(state)
         return
     if state.pop("new_chat", False):
-        send("✅ Options alerts are ON for this chat.\nYou'll get a morning brief each weekday,"
-             " plus alerts for big moves and big bets on your watchlist.", chat_id)
+        send("✅ Options alerts are ON for this chat.\nEvery weekday: a morning brief at 8:45am New York,"
+             " plus alerts for big moves and big bets on the watchlist.\nAlerts only, not advice.", chat_id, state)
     weekday = today.weekday() < 5
     watch = load_watchlist()
     mkt = Market()
@@ -485,7 +498,7 @@ def main():
 
     if FORCE in ("brief", "all") or (weekday and now.time() >= BRIEF_START and state.get("brief") != day
                                      and now.time() < SCAN_END):
-        send(build_brief(mkt, watch, today), chat_id)
+        chat_id = send(build_brief(mkt, watch, today), chat_id, state)
         state["brief"] = day
         save_state(state)
 
@@ -502,14 +515,14 @@ def main():
                 print(f"{sym}: {pct:+.2f}% level {lvl}")
                 if lvl and (sent.get(key, 0) < lvl or FORCE):
                     s = snapshot(mkt, sym, today)
-                    send(build_move_alert(mkt, s, pct, lvl, today), chat_id)
+                    chat_id = send(build_move_alert(mkt, s, pct, lvl, today), chat_id, state)
                     sent[key] = lvl
                 if do_uoa:
                     bets = find_big_bets(mkt, sym, days[-1][1], today, mkt.expiries(sym))
                     for b in sorted(bets, key=lambda b: -b["dollars"])[:1]:
                         k = f"{day}:bet:{sym}:{b['kind']}:{b['strike']}:{b['expiry']}"
                         if k not in sent or FORCE:
-                            send(build_big_bet_alert(b, days[-1][1]), chat_id)
+                            chat_id = send(build_big_bet_alert(b, days[-1][1]), chat_id, state)
                             sent[k] = 1
             except Exception as e:
                 print(f"{sym}: scan failed: {e}")

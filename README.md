@@ -43,7 +43,7 @@ and take profit 1 / 2 (35 / 50 pips; 1 pip = $0.10 on gold).
 
 ## Options alert bot (separate, in `options/`)
 
-Sends options alerts to a **private Telegram chat** with the same bot (never to the gold group).
+Sends options alerts to its own Telegram group, **Options Alerts**, using the same bot (never to the gold group).
 Code: `options/options_bot.py`, workflow: `.github/workflows/options-alert.yml`. It never trades.
 
 - **Morning brief** (weekdays after 8:45am NY): upcoming earnings, Fed decisions, CPI and jobs reports;
@@ -56,7 +56,7 @@ Code: `options/options_bot.py`, workflow: `.github/workflows/options-alert.yml`.
 Cheap or pricey = implied volatility (what the option price assumes) vs how much the stock normally moves
 (average of its last-month and last-year volatility). Data: Yahoo Finance (free, about 15 min delayed for options).
 
-**Setup:** in Telegram, open a private chat with @justinroas_gold_alert_bot and send `/options`.
-The bot finds that chat by itself. (Or set the `OPTIONS_TELEGRAM_CHAT_ID` secret.)
+**Setup:** make a Telegram group called Options Alerts, add @justinroas_gold_alert_bot,
+and send `/options@justinroas_gold_alert_bot` in the group. The bot finds that chat by itself. (Or set the `OPTIONS_TELEGRAM_CHAT_ID` secret.)
 **Watchlist:** edit `options/watchlist.txt`. **Timing:** it runs right after each gold-bot run, with a GitHub backup timer.
 **Test:** Actions → Options alert → Run workflow → pick `brief`.
