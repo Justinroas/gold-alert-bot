@@ -129,7 +129,7 @@ def strategies():
 
 
 def main():
-    tickers = os.environ.get("TICKERS", "SPY,QQQ,IWM,GLD,NVDA,AAPL,AMD,TSLA,META,MSFT,AMZN,GOOGL,PLTR").split(",")
+    tickers = (os.environ.get("TICKERS") or "SPY,QQQ,IWM,GLD,NVDA,AAPL,AMD,TSLA,META,MSFT,AMZN,GOOGL,PLTR").split(",")
     vix = [(b[0], b[4]) for b in load("^VIX")]
     out = [f"## Daily strategy replay ({YEARS})", "",
            "Cells: trades / win % / avg return / avg days held / pop % (moved 2%+ our way, 1% for ETFs).",
