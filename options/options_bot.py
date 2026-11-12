@@ -701,28 +701,33 @@ def build_move_alert(mkt, s, pct, level, today, earn=None, pick=None):
     return signal_text(kind, sym, why, pick, sell), kind
 
 
-GUIDE = """📌 HOW TO READ THESE ALERTS
+GUIDE = """👋 WELCOME TO OPTIONS ALERTS
 
+This chat sends stock options trade ideas on SPY and big stocks (NVDA, TSLA, AAPL, AMZN, MSFT, META, GOOGL, AMD, PLTR, QQQ). It's alerts only. Nobody trades for you: you decide and buy in your own app.
+
+⏰ WHAT YOU'LL GET (weekdays)
+☀️ 8:45am · Morning brief: big events coming (earnings, Fed, inflation, jobs) and whether options are 🟢 cheap or 🔴 pricey today.
+📈 9:50-11:30am · SPY breakout: SPY breaks out of its first-15-minute range and the fear meter agrees.
+⚡ All day · Big move: a stock jumps or drops 3%+ and is holding it.
+📰 12pm + 3:30pm · Market news: the top headlines and why they matter to us.
+🩸 3:45pm · Panic dip: a strong stock got dumped while the market is scared. Usually bounces within days.
+
+📖 HOW TO READ AN ALERT
 📗 BUY CALL = bet the stock goes UP
 📕 BUY PUT = bet the stock goes DOWN
 💰 CLOSE POSITION = sell your option: take the profit or get out
-
-Buy: which option to buy. Prices are per share, so 1 contract = price x 100.
+Buy: which option to buy. Prices are per share, so 1 contract = price x 100 (a $0.85 option costs $85).
 Close position: when to get out. Always follow it.
 Risk: 🟢 Clear trade · 🟡 Risky · 🔴 Lottery ticket (small bet only)
 
-The 3 strategies:
-1. Big move: a stock jumps or drops 3%+ and is holding it.
-2. SPY breakout (9:50-11:30am): SPY breaks its first-15-minute range and the fear meter agrees.
-3. Panic dip (3:45pm): a good stock got dumped while the market is scared. Usually bounces in ~3 days.
-
-📰 News roundups at 12pm and 3:30pm: the top 5 market headlines.
-
+🧠 WORDS YOU'LL SEE
 VIX = the market's fear meter. Under 15 calm, 20+ scared, 30+ panic.
-RSI-2 = how beaten up a stock is over 2 days (0-100). Under 10 = stretched way down, likely to snap back.
+RSI-2 = how beaten up a stock is (0-100). Under 10 = stretched way down, likely to snap back.
 
-☀️ 8:45am brief: big events coming up, and whether options are 🟢 cheap or 🔴 pricey.
-Alerts only, not financial advice. Only bet money you're OK losing."""
+✅ TIPS
+• Always check the live price in your app before buying. The price in the alert is a guide.
+• The strategies were tested on years of past prices, but nothing wins every time.
+• Not financial advice. Only bet money you're OK losing."""
 
 
 class _SampleMarket:
