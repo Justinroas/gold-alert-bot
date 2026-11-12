@@ -1,0 +1,62 @@
+name: Options alert
+
+on:
+  # Rides along with the gold bot's timer (cron-job.org starts it every 10 min, 7am-4pm NY).
+  workflow_run:
+    workflows: ["Gold alert"]
+    types: [completed]
+  # Backup timer in case the gold runs stop (GitHub's own timer can be late).
+  schedule:
+    - cron: "5/30 13-20 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Run now and send: brief, scan or all"
+        type: choice
+        options: ["", "brief", "scan", "all"]
+        default: ""
+
+concurrency: options-alert
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Only work on weekdays 8:40am-4:10pm New York (or when started by hand)
+        id: gate
+        run: |
+          d=$(TZ=America/New_York date +%u); t=$(TZ=America/New_York date +%H%M)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || { [ "$d" -le 5 ] && (( 10#$t >= 840 && 10#$t <= 1610 )); }; then
+            echo "go=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "Outside market hours, nothing to do."
+          fi
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.go
+      - uses: actions/setup-python@v5
+        if: steps.gate.outputs.go
+        with:
+          python-version: "3.12"
+      - if: steps.gate.outputs.go
+        run: pip install -r options/requirements.txt
+      - name: Remember what was already sent (no repeats)
+        if: steps.gate.outputs.go
+        uses: actions/cache/restore@v4
+        with:
+          path: .state
+          key: options-state-${{ github.run_id }}
+          restore-keys: options-state-
+      - if: steps.gate.outputs.go
+        run: python options/options_bot.py
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          OPTIONS_TELEGRAM_BOT_TOKEN: ${{ secrets.OPTIONS_TELEGRAM_BOT_TOKEN }}
+          OPTIONS_TELEGRAM_CHAT_ID: ${{ secrets.OPTIONS_TELEGRAM_CHAT_ID }}
+          GOLD_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          FORCE: ${{ inputs.force }}
+          STATE_FILE: .state/options.json
+      - if: steps.gate.outputs.go && always()
+        uses: actions/cache/save@v4
+        with:
+          path: .state
+          key: options-state-${{ github.run_id }}
