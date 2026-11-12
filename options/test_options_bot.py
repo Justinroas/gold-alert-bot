@@ -109,7 +109,10 @@ def test_budget_pick_fits_budget_and_window():
     assert "PICK: none" in ob.budget_text("XYZ", "call", 100, None, date(2026, 11, 12))
 
 
-def test_budget_text_lottery_ticket():
+def test_risk_tags():
     pick = dict(strike=720, premium=0.83, expiry="2026-11-20", prob=0.03)
     t = ob.budget_text("AMD", "call", 581, pick, date(2026, 11, 12))
-    assert "skip it" in t and "lottery ticket" in t and "$720.83" in t
+    assert "LOTTERY TICKET" in t and "$720.83" in t and "about 3%" in t
+    assert ob.risk_tag(0.4)[0] == "🟢 CLEAR TRADE"
+    assert ob.risk_tag(0.2)[0] == "🟡 RISKY"
+    assert ob.risk_tag(0.1)[0] == "🔴 LOTTERY TICKET"
