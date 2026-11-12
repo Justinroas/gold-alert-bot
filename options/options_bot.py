@@ -38,7 +38,9 @@ BUDGET = float(os.environ.get("BUDGET", "100"))  # most you want to spend per tr
 PICK_MIN_DAYS, PICK_MAX_DAYS = 7, 45  # expiries the budget pick looks at
 HOLD_STRONG = 0.6  # price in the top 40% of today's range (bottom 40% for drops) = holding the move
 HOLD_WEAK = 0.35   # gave back most of the move = fading
-MIN_CHANCE = 0.10  # a budget option with less chance than this is a lottery ticket: skip it
+MIN_CHANCE = 0.10  # the brief's example trade needs at least this chance
+CLEAR_CHANCE = 0.30  # chance of paying off: 30%+ = clear trade, 15-30% = risky, under 15% = lottery ticket
+RISKY_CHANCE = 0.15
 RATE = 0.04
 
 BRIEF_START = time(8, 45)
@@ -170,7 +172,7 @@ def trade_math(ticker, kind, price, strike, premium, expiry, today, prob=None, t
         f"  Breakeven: {ticker} must be {dirword} {money(be)} on {nice_date(exp)}"
         f" (-{need:.1f}% from {money(price)})",
         *([f"  Chance it pays off by then (options-market math): about {prob * 100:.0f}%"
-           + ("  ⚠️ long shot" if prob < 0.2 else "")] if prob is not None else []),
+           ] if prob is not None else []),
         f"  Most you can lose: {money(cost)} (if {ticker} ends {endword} {money(strike)})",
         f"  If {ticker} moves {move:.0f}% to {money(target)} by then: worth about ${value:,.0f},"
         f" {'profit' if profit >= 0 else 'loss'} about ${abs(profit):,.0f}",
@@ -272,20 +274,22 @@ def budget_pick(mkt, sym, kind, price, today, budget=BUDGET):
     return best
 
 
+def risk_tag(prob):
+    """How risky a trade is, from its chance of paying off."""
+    if prob >= CLEAR_CHANCE:
+        return "🟢 CLEAR TRADE", "decent chance, normal risk"
+    if prob >= RISKY_CHANCE:
+        return "🟡 RISKY", "less than 1-in-3 chance, could go either way"
+    return "🔴 LOTTERY TICKET", "small chance, big payout if it hits. Only money you're fine losing"
+
+
 def budget_text(sym, kind, price, pick, today, budget=BUDGET):
     if not pick:
         return (f"💵 YOUR ${budget:.0f} PICK: none. No {sym} {kind} under ${budget:.0f} is for sale right now."
                 " Skip this one.")
-    if pick["prob"] < MIN_CHANCE:
-        exp = datetime.strptime(pick["expiry"], "%Y-%m-%d").date()
-        be = pick["strike"] + pick["premium"] if kind == "call" else pick["strike"] - pick["premium"]
-        return (f"💵 YOUR ${budget:.0f} PICK: skip it. {sym} is too expensive for ${budget:.0f}."
-                f" The best {kind} under ${budget:.0f} needs {sym} to reach {money(be)}"
-                f" ({abs(be / price - 1) * 100:.0f}% {'up' if kind == 'call' else 'down'}) by {nice_date(exp)}:"
-                f" only about a {pick['prob'] * 100:.0f}% chance. That's a lottery ticket.")
     n = int(budget // (pick["premium"] * 100))
     text = trade_math(sym, kind, price, pick["strike"], pick["premium"], pick["expiry"], today,
-                      prob=pick["prob"], title=f"💵 YOUR ${budget:.0f} PICK:")
+                      prob=pick["prob"], title=f"💵 YOUR ${budget:.0f} PICK ({risk_tag(pick['prob'])[0]}):")
     if n > 1:
         text += f"\n  (Your ${budget:.0f} buys {n} contracts = {money(n * pick['premium'] * 100)}. Multiply the numbers by {n}.)"
     return text + "\n  Simple rule: sell if the option doubles, get out if it loses half."
@@ -458,7 +462,11 @@ def build_move_alert(mkt, s, pct, level, today, earn=None):
         parts.append(f"📰 News: {h}")
     parts.append(f"🎯 {label}\n{why}")
     if kind:
-        parts.append(budget_text(sym, kind, price, budget_pick(mkt, sym, kind, price, today), today))
+        pick = budget_pick(mkt, sym, kind, price, today)
+        if pick:
+            tag, meaning = risk_tag(pick["prob"])
+            parts[0] += f"\n{tag}: {meaning}"
+        parts.append(budget_text(sym, kind, price, pick, today))
     parts.append(verdict_line(sym, s["iv"], s["hv"]))
     if earn is not None and 0 <= (earn - today).days <= 3:
         parts.append(f"📣 Heads up: {sym} reports earnings {nice_date(earn)} ({when_word(earn, today)})."
