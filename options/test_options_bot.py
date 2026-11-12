@@ -116,3 +116,10 @@ def test_risk_tags():
     assert ob.risk_tag(0.4)[0] == "🟢 CLEAR TRADE"
     assert ob.risk_tag(0.2)[0] == "🟡 RISKY"
     assert ob.risk_tag(0.1)[0] == "🔴 LOTTERY TICKET"
+
+
+def test_sample_alerts_cover_each_risk_level():
+    texts = ob.sample_alerts(date(2026, 11, 12))
+    assert len(texts) == 3
+    assert "CLEAR TRADE" in texts[0] and "RISKY" in texts[1] and "LOTTERY TICKET" in texts[2]
+    assert all(t.startswith("🧪 TEST ALERT") for t in texts)

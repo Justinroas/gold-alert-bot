@@ -11,9 +11,9 @@ on:
   workflow_dispatch:
     inputs:
       force:
-        description: "Run now and send: brief, scan or all"
+        description: "Run now and send: brief, scan, all, or samples (3 test alerts)"
         type: choice
-        options: ["", "brief", "scan", "all"]
+        options: ["", "brief", "scan", "all", "samples"]
         default: ""
       dry_run:
         description: "Only print the alerts in the log (don't send)"
