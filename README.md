@@ -55,6 +55,15 @@ Code: `options/options_bot.py`, workflow: `.github/workflows/options-alert.yml`.
   the option under the budget (`BUDGET`, default $100 for 1 contract, expiring in 7-45 days) with the best
   chance of paying off, and shows cost, breakeven, that chance, and max loss.
 
+- **SPY breakout** (9:50-11:30am): SPY closes a 5-min candle above (CALL) or below (PUT) its first-15-minute
+  range, and VIX agrees (falling for calls, rising for puts). Only the day's first breakout counts; if VIX
+  disagrees, the day is skipped. Stop = middle of the range, target = 1 range-height past entry.
+  Replay (`options/backtest_spy.py`, Actions → Options strategy replay): 60 days, VIX agrees 54% win / +0.30R,
+  VIX disagrees 33% / -0.19R; 2 years of hourly candles, VIX 20+ and agrees 60-74% win.
+
+Alerts are short, signal-chat style, and only sent when there's a setup. Each has a risk tag from the
+option's chance of paying off: CLEAR TRADE (30%+), RISKY (15-30%), LOTTERY TICKET (under 15%).
+
 Cheap or pricey = implied volatility (what the option price assumes) vs how much the stock normally moves
 (average of its last-month and last-year volatility). Data: Yahoo Finance (free, about 15 min delayed for options).
 

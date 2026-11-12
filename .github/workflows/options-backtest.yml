@@ -2,9 +2,6 @@ name: Options strategy replay
 
 on:
   workflow_dispatch:
-  push:
-    branches: [claude/project-thread-auuwho]
-    paths: ["options/backtest_spy.py", ".github/workflows/options-backtest.yml"]
 
 jobs:
   replay:
