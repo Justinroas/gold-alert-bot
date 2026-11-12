@@ -171,7 +171,10 @@ def trade_math(ticker, kind, price, strike, premium, expiry, today, prob=None, t
         f" ({need:+.1f}% from {money(price)})" if kind == "call" else
         f"  Breakeven: {ticker} must be {dirword} {money(be)} on {nice_date(exp)}"
         f" (-{need:.1f}% from {money(price)})",
-        *([f"  Chance it pays off by then (options-market math): about {prob * 100:.0f}%"
+        *([f"  Chance it pays off by then (options-market math): about {prob * 100:.0f}%",
+           f"  To double your money: {ticker} needs to reach {money(strike + 2 * premium if kind == 'call' else strike - 2 * premium)}"
+           f" ({abs((strike + 2 * premium if kind == 'call' else strike - 2 * premium) / price - 1) * 100:.0f}%"
+           f" {'up' if kind == 'call' else 'down'}) by {nice_date(exp)}"
            ] if prob is not None else []),
         f"  Most you can lose: {money(cost)} (if {ticker} ends {endword} {money(strike)})",
         f"  If {ticker} moves {move:.0f}% to {money(target)} by then: worth about ${value:,.0f},"
