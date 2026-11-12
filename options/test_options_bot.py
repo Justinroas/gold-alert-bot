@@ -120,6 +120,29 @@ def test_risk_tags():
 
 def test_sample_alerts_cover_each_risk_level():
     texts = ob.sample_alerts(date(2026, 11, 12))
-    assert len(texts) == 3
+    assert len(texts) == 4 and "SPY BREAKOUT" in texts[3]
     assert "CLEAR TRADE" in texts[0] and "RISKY" in texts[1] and "LOTTERY TICKET" in texts[2]
-    assert all(t.startswith("🧪 TEST ALERT") for t in texts)
+    assert all(t.startswith("🧪 TEST") for t in texts)
+
+
+def _bars(day, rows):
+    from datetime import datetime, time, timedelta
+    t0 = datetime.combine(day, time(9, 30), tzinfo=ob.NY)
+    return [dict(start=t0 + timedelta(minutes=5 * i), high=h, low=l, close=c) for i, (h, l, c) in enumerate(rows)]
+
+
+def test_orb_signal_call_with_vix_agreeing():
+    from datetime import datetime, time
+    d = date(2026, 11, 12)
+    spy = _bars(d, [(101, 99, 100), (100.5, 99.5, 100), (100.8, 99.2, 100.5),  # range 99-101
+                    (100.9, 100.2, 100.7), (101.6, 100.8, 101.4), (102, 101, 101.8)])
+    vix = _bars(d, [(20, 19, 19.5)] * 6)
+    sig = ob.orb_signal(spy, vix, 20.0, datetime.combine(d, time(10, 30), tzinfo=ob.NY))
+    assert sig["side"] == "call" and sig["price"] == 101.4 and sig["agree"]
+    assert sig["stop"] == 100 and sig["target"] == 103.4
+    # VIX up while SPY breaks up: disagrees
+    assert not ob.orb_signal(spy, vix, 19.0, datetime.combine(d, time(10, 30), tzinfo=ob.NY))["agree"]
+    # candle not finished yet: no signal
+    assert ob.orb_signal(spy, vix, 20.0, datetime.combine(d, time(9, 52), tzinfo=ob.NY)) is None
+    text = ob.build_orb_alert(sig, None, d)
+    assert text.startswith("📘 SPY BREAKOUT · 📗 CALL")
