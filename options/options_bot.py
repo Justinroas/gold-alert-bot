@@ -355,6 +355,91 @@ def build_orb_alert(sig, pick, today):
     return "\n".join(lines)
 
 
+# ---------- Panic dip: healthy stock dumped in a scared market -> CALL ----------
+# 10-year replay (options/backtest_daily.py): above 200-day avg, RSI-2 under 10, VIX 20+, buy at the close,
+# sell when it closes above its 5-day avg (about 3 days). Win rates below; both 5-year halves held up.
+DIP_WIN = {"SPY": 83, "QQQ": 78, "IWM": 78, "META": 89, "AAPL": 87, "MSFT": 86, "NVDA": 79, "AMZN": 77,
+           "AMD": 73, "GOOGL": 68, "TSLA": 68, "PLTR": 73, "GLD": 71}
+DIP_CHECK = (time(15, 40), time(15, 58))
+DIP_MAX_DAYS = 10  # give up and sell after this many trading days
+
+
+def rsi2(closes):
+    """2-day RSI (Wilder). Under 10 = sold off hard."""
+    out, up, dn = [None] * len(closes), None, None
+    for i in range(1, len(closes)):
+        ch = closes[i] - closes[i - 1]
+        g, l = max(ch, 0), max(-ch, 0)
+        up, dn = (g, l) if up is None else ((up + g) / 2, (dn + l) / 2)
+        out[i] = 100 if dn == 0 else 100 - 100 / (1 + up / dn)
+    return out
+
+
+def dip_signal(closes, vix):
+    """closes: daily closes, today's (live) last. Returns the details if it's a panic dip, else None."""
+    if len(closes) < 201 or vix is None:
+        return None
+    avg200 = sum(closes[-200:]) / 200
+    r = rsi2(closes)[-1]
+    if closes[-1] > avg200 and r is not None and r < 10 and vix >= 20:
+        return dict(rsi=r, avg200=avg200, avg5=sum(closes[-5:]) / 5)
+    return None
+
+
+def dip_exit(closes, entry_index_from_end):
+    """Sell when the close is back above the 5-day average, or after DIP_MAX_DAYS."""
+    avg5 = sum(closes[-5:]) / 5
+    if closes[-1] > avg5:
+        return "bounce"
+    if entry_index_from_end >= DIP_MAX_DAYS:
+        return "time"
+    return None
+
+
+def dip_pick(mkt, sym, price, today):
+    """At-the-money call 2-5 weeks out: room for the ~3-day bounce without paying for months."""
+    exp = pick_expiry(mkt.expiries(sym), today, lo=14, hi=35, target=21)
+    if not exp:
+        return None
+    calls, _ = mkt.chain(sym, exp)
+    r = nearest_row(calls, price)
+    if not r:
+        return None
+    p = premium_of(r)
+    years = max((datetime.strptime(exp, "%Y-%m-%d").date() - today).days, 1) / 365
+    iv = implied_vol("call", p, price, r["strike"], years)
+    if not p or not iv:
+        return None
+    return dict(strike=r["strike"], premium=p, expiry=exp,
+                prob=prob_profit("call", price, r["strike"] + p, years, iv))
+
+
+def build_dip_alert(sym, price, sig, vix, pick):
+    tag = f" · {risk_tag(pick['prob'])[0]}" if pick else ""
+    win = DIP_WIN.get(sym)
+    lines = [f"🟢 PANIC DIP · {sym} · 📗 CALL{tag}",
+             f"Why: {sym} got dumped (RSI-2 {sig['rsi']:.0f}) but is still in a long-term uptrend, and VIX {vix:.0f} = market scared."
+             + (f" Won {win}% over 10 yrs" if win else "") + ", usually bounces in ~3 days.",
+             f"Buy before 4pm: {sym} ~{short_money(price)}"]
+    if pick:
+        exp = datetime.strptime(pick["expiry"], "%Y-%m-%d").date()
+        lines.append(f"Option: {short_money(pick['strike'])} call · exp {exp.strftime('%b')} {exp.day}"
+                     f" · {short_money(pick['premium'])} ({short_money(pick['premium'] * 100)}/contract)"
+                     f" · {pick['prob'] * 100:.0f}% chance")
+    lines.append(f"Sell when: {sym} closes above its 5-day avg (~{short_money(sig['avg5'])}). I'll alert you.")
+    return "\n".join(lines)
+
+
+def build_dip_exit(sym, price, entry_price, reason):
+    chg = (price / entry_price - 1) * 100
+    if reason == "bounce":
+        return (f"💰 SELL · {sym} call (panic dip)\n"
+                f"{sym} closed back above its 5-day avg: the bounce is here. Stock {chg:+.1f}% since the alert"
+                f" ({short_money(entry_price)} → {short_money(price)}). Take it.")
+    return (f"⏰ SELL · {sym} call (panic dip)\n"
+            f"No bounce after {DIP_MAX_DAYS} trading days. Stock {chg:+.1f}% since the alert. Get out before the option loses more.")
+
+
 # ---------- market data (Yahoo Finance via yfinance) ----------
 
 class Market:
@@ -571,6 +656,9 @@ def sample_alerts(today):
                vix=21.4, vix_prev=22.6, agree=True)
     pick = dict(strike=760, premium=0.95, expiry=(today + timedelta(days=8)).isoformat(), prob=0.17)
     out.append("🧪 TEST (made-up prices)\n" + build_orb_alert(sig, pick, today))
+    pick = dict(strike=225, premium=6.10, expiry=(today + timedelta(days=22)).isoformat(), prob=0.41)
+    out.append("🧪 TEST (made-up prices)\n" + build_dip_alert("AAPL", 224.80, dict(rsi=6, avg5=229.40), 23.4, pick))
+    out.append("🧪 TEST (made-up prices)\n" + build_dip_exit("AAPL", 230.10, 224.80, "bounce"))
     return out
 
 
@@ -742,7 +830,44 @@ def main():
                     sent[key] = dict(lvl=max(lvl, had.get("lvl", 0)), setup=bool(kind) or had.get("setup", False))
             except Exception as e:
                 print(f"{sym}: scan failed: {e}")
+    if FORCE in ("dip", "all") or (weekday and DIP_CHECK[0] <= now.time() <= DIP_CHECK[1]
+                                    and state.get("dip_day") != day):
+        state["dip_day"] = day
+        try:
+            check_dips(mkt, watch, state, today, lambda t: send(t, None if quiet else chat_id, state))
+        except Exception as e:
+            print(f"Panic dip check failed: {e}")
     save_state(state)
+
+
+def check_dips(mkt, watch, state, today, say):
+    vix_days = mkt.daily("^VIX")
+    vix = vix_days[-1][1] if vix_days else None
+    print(f"VIX now {vix}")
+    open_dips = state.setdefault("dips", {})
+    for sym in watch:
+        try:
+            days = mkt.daily(sym)
+            if days[-1][0] != today:
+                continue
+            closes = [c for _, c in days]
+            price = closes[-1]
+            if sym in open_dips:  # holding: time to sell?
+                d = open_dips[sym]
+                n = sum(1 for dd, _ in days if dd.isoformat() > d["date"])
+                why = dip_exit(closes, n)
+                print(f"{sym}: open dip from {d['date']}, {n} days, exit={why}")
+                if why:
+                    say(build_dip_exit(sym, price, d["price"], why))
+                    del open_dips[sym]
+                continue
+            sig = dip_signal(closes, vix)
+            print(f"{sym}: dip={bool(sig)}")
+            if sig:
+                say(build_dip_alert(sym, price, sig, vix, dip_pick(mkt, sym, price, today)))
+                open_dips[sym] = dict(date=today.isoformat(), price=price)
+        except Exception as e:
+            print(f"{sym}: dip check failed: {e}")
 
 
 if __name__ == "__main__":

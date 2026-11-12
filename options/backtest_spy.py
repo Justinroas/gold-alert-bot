@@ -153,7 +153,47 @@ def report(title, trades):
     return "\n".join(out)
 
 
+def cell(trades):
+    if not trades:
+        return "-"
+    n = len(trades)
+    return f"{n} / {sum(1 for t in trades if t['r'] > 0) / n * 100:.0f}% / {sum(t['r'] for t in trades) / n:+.2f}R"
+
+
+def compare(tickers, fear="^VIX"):
+    """One row per ticker: trades / win % / average R for each version."""
+    vixd = load(fear, "1d", "3y")
+    v5 = vix_lookup(load(fear, "5m", "60d"), vixd)
+    v1h = vix_lookup(load(fear, "1h", "730d"), vixd)
+    rows = [f"### Opening-range breakout by ticker (fear gauge: {fear})", "",
+            "Cells: trades / win % / avg R. Win = target before stop.", "",
+            "| Ticker | 60d all | 60d fear agrees | 60d fear disagrees | 2y all | 2y fear agrees | 2y fear 20+ & agrees |",
+            "|---|---|---|---|---|---|---|"]
+    for tk in tickers:
+        try:
+            t5 = simulate(by_day(load(tk, "5m", "60d")), 15, 5, time(11, 30), v5)
+            t1 = simulate(by_day(load(tk, "1h", "730d")), 60, 60, time(13, 30), v1h)
+        except Exception as e:
+            rows.append(f"| {tk} | error: {e} | | | | | |")
+            continue
+        ag = lambda ts: [t for t in ts if (t["side"] == "call" and t["vix_dir"] == "down")
+                         or (t["side"] == "put" and t["vix_dir"] == "up")]
+        dis = lambda ts: [t for t in ts if t["vix_dir"] and t not in ag(ts)]
+        rows.append(f"| {tk} | {cell(t5)} | {cell(ag(t5))} | {cell(dis(t5))} | {cell(t1)} | {cell(ag(t1))} |"
+                    f" {cell([t for t in ag(t1) if t['vix_level'] and t['vix_level'] >= 20])} |")
+    return "\n".join(rows) + "\n"
+
+
 def main():
+    tickers = os.environ.get("TICKERS")
+    if tickers:
+        text = compare(tickers.split(",")) + "\n" + compare(["GLD"], fear="^GVZ")
+        print(text)
+        summary = os.environ.get("GITHUB_STEP_SUMMARY")
+        if summary:
+            with open(summary, "a") as f:
+                f.write(text + "\n")
+        return
     spy5 = load("SPY", "5m", "60d")
     vix5 = load("^VIX", "5m", "60d")
     vixd = load("^VIX", "1d", "3y")

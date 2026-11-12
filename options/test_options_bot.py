@@ -120,7 +120,7 @@ def test_risk_tags():
 
 def test_sample_alerts_cover_each_risk_level():
     texts = ob.sample_alerts(date(2026, 11, 12))
-    assert len(texts) == 4 and "SPY BREAKOUT" in texts[3]
+    assert len(texts) == 6 and "SPY BREAKOUT" in texts[3] and "PANIC DIP" in texts[4] and "SELL" in texts[5]
     assert "CLEAR TRADE" in texts[0] and "RISKY" in texts[1] and "LOTTERY TICKET" in texts[2]
     assert all(t.startswith("🧪 TEST") for t in texts)
 
@@ -146,3 +146,16 @@ def test_orb_signal_call_with_vix_agreeing():
     assert ob.orb_signal(spy, vix, 20.0, datetime.combine(d, time(9, 52), tzinfo=ob.NY)) is None
     text = ob.build_orb_alert(sig, None, d)
     assert text.startswith("📘 SPY BREAKOUT · 📗 CALL")
+
+
+def test_dip_signal_and_exit():
+    up = [100 + i * 0.2 for i in range(220)]           # long uptrend
+    dumped = up + [up[-1] * 0.98, up[-1] * 0.96]       # two hard down days
+    assert ob.dip_signal(dumped, 24) is not None       # scared market -> signal
+    assert ob.dip_signal(dumped, 15) is None           # calm market -> no signal
+    assert ob.dip_signal(up, 24) is None               # no dip -> no signal
+    crash = [200 - i * 0.3 for i in range(220)] + [130, 125]
+    assert ob.dip_signal(crash, 30) is None            # below its 200-day avg -> no signal
+    assert ob.dip_exit(dumped + [up[-1] * 1.01], 1) == "bounce"
+    assert ob.dip_exit(dumped + [up[-1] * 0.95], 1) is None
+    assert ob.dip_exit(dumped + [up[-1] * 0.95], 10) == "time"
