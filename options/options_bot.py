@@ -296,7 +296,7 @@ def signal_text(kind, sym, why, pick, sell):
         exp = datetime.strptime(pick["expiry"], "%Y-%m-%d").date()
         lines.append(f"Buy: {sym} {short_money(pick['strike'])} {kind}, expires {exp.strftime('%b')} {exp.day},"
                      f" about {short_money(pick['premium'] * 100)}")
-    lines.append(f"Sell: {sell}")
+    lines.append(f"Close position: {sell}")
     if pick:
         lines.append(f"Risk: {RISK_WORDS[risk_tag(pick['prob'])[0]]}")
     return "\n".join(lines)
@@ -432,8 +432,8 @@ def build_dip_alert(sym, price, sig, vix, pick):
 def build_dip_exit(sym, price, entry_price, reason):
     chg = (price / entry_price - 1) * 100
     if reason == "bounce":
-        return f"💰 SELL NOW · {sym} call\nThe bounce happened. {sym} is {chg:+.1f}% since the buy alert."
-    return f"⏰ SELL NOW · {sym} call\nNo bounce after {DIP_MAX_DAYS} days ({sym} {chg:+.1f}%). Get out before it loses more."
+        return f"💰 CLOSE POSITION · {sym} call\nThe bounce happened. {sym} is {chg:+.1f}% since the buy alert."
+    return f"⏰ CLOSE POSITION · {sym} call\nNo bounce after {DIP_MAX_DAYS} days ({sym} {chg:+.1f}%). Get out before it loses more."
 
 
 # ---------- market data (Yahoo Finance via yfinance) ----------
@@ -603,10 +603,10 @@ GUIDE = """📌 HOW TO READ THESE ALERTS
 
 📗 BUY CALL = bet the stock goes UP
 📕 BUY PUT = bet the stock goes DOWN
-💰 SELL NOW = take your profit / get out
+💰 CLOSE POSITION = sell your option: take the profit or get out
 
 Buy: which option to buy. Prices are per share, so 1 contract = price x 100.
-Sell: when to get out. Always follow it.
+Close position: when to get out. Always follow it.
 Risk: 🟢 Clear trade · 🟡 Risky · 🔴 Lottery ticket (small bet only)
 
 The 3 strategies:

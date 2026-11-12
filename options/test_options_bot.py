@@ -120,7 +120,7 @@ def test_risk_tags():
 
 def test_sample_alerts_cover_each_risk_level():
     texts = ob.sample_alerts(date(2026, 11, 12))
-    assert len(texts) == 6 and "· SPY" in texts[3] and "RSI-2" in texts[4] and "SELL NOW" in texts[5]
+    assert len(texts) == 6 and "· SPY" in texts[3] and "RSI-2" in texts[4] and "CLOSE POSITION" in texts[5]
     assert "Clear trade" in texts[0] and "Risky" in texts[1] and "Lottery ticket" in texts[2]
     assert all(t.startswith("🧪 TEST") for t in texts)
 
