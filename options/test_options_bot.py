@@ -106,4 +106,10 @@ def test_budget_pick_fits_budget_and_window():
     assert pick["expiry"] in ("2026-11-27", "2026-12-18")  # 7-45 days only
     t = ob.budget_text("XYZ", "call", 100, pick, date(2026, 11, 12))
     assert "YOUR $100 PICK" in t and "Chance it pays off" in t
-    assert "no XYZ call under $100" in ob.budget_text("XYZ", "call", 100, None, date(2026, 11, 12))
+    assert "PICK: none" in ob.budget_text("XYZ", "call", 100, None, date(2026, 11, 12))
+
+
+def test_budget_text_lottery_ticket():
+    pick = dict(strike=720, premium=0.83, expiry="2026-11-20", prob=0.03)
+    t = ob.budget_text("AMD", "call", 581, pick, date(2026, 11, 12))
+    assert "skip it" in t and "lottery ticket" in t and "$720.83" in t

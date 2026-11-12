@@ -38,6 +38,7 @@ BUDGET = float(os.environ.get("BUDGET", "100"))  # most you want to spend per tr
 PICK_MIN_DAYS, PICK_MAX_DAYS = 7, 45  # expiries the budget pick looks at
 HOLD_STRONG = 0.6  # price in the top 40% of today's range (bottom 40% for drops) = holding the move
 HOLD_WEAK = 0.35   # gave back most of the move = fading
+MIN_CHANCE = 0.10  # a budget option with less chance than this is a lottery ticket: skip it
 RATE = 0.04
 
 BRIEF_START = time(8, 45)
@@ -273,8 +274,15 @@ def budget_pick(mkt, sym, kind, price, today, budget=BUDGET):
 
 def budget_text(sym, kind, price, pick, today, budget=BUDGET):
     if not pick:
-        return (f"💵 YOUR ${budget:.0f} PICK: no {sym} {kind} under ${budget:.0f} that's worth it."
-                f" {sym} options are too expensive for this budget. Skip it or wait for a cheaper stock.")
+        return (f"💵 YOUR ${budget:.0f} PICK: none. No {sym} {kind} under ${budget:.0f} is for sale right now."
+                " Skip this one.")
+    if pick["prob"] < MIN_CHANCE:
+        exp = datetime.strptime(pick["expiry"], "%Y-%m-%d").date()
+        be = pick["strike"] + pick["premium"] if kind == "call" else pick["strike"] - pick["premium"]
+        return (f"💵 YOUR ${budget:.0f} PICK: skip it. {sym} is too expensive for ${budget:.0f}."
+                f" The best {kind} under ${budget:.0f} needs {sym} to reach {money(be)}"
+                f" ({abs(be / price - 1) * 100:.0f}% {'up' if kind == 'call' else 'down'}) by {nice_date(exp)}:"
+                f" only about a {pick['prob'] * 100:.0f}% chance. That's a lottery ticket.")
     n = int(budget // (pick["premium"] * 100))
     text = trade_math(sym, kind, price, pick["strike"], pick["premium"], pick["expiry"], today,
                       prob=pick["prob"], title=f"💵 YOUR ${budget:.0f} PICK:")
@@ -419,17 +427,18 @@ def build_brief(mkt, watchlist, today):
                      " (the 'IV crush'). Buying calls/puts the day before earnings only pays if the move"
                      " is BIGGER than the ± number above.")
     parts.append("💲 CHEAP OR PRICEY?\n" + "\n".join(verdicts) + "\n\n" + VERDICT_HELP)
-    cheapest = [s for s in snaps.values() if verdict(s["iv"], s["hv"])[1] == "CHEAP"]
-    if cheapest:
-        s = min(cheapest, key=lambda s: s["iv"] / s["hv"])
+    cheapest = sorted((s for s in snaps.values() if verdict(s["iv"], s["hv"])[1] == "CHEAP"),
+                      key=lambda s: s["iv"] / s["hv"])
+    for s in cheapest:  # first cheap stock with a $100 option that isn't a lottery ticket
         try:
             pick = budget_pick(mkt, s["sym"], "call", s["price"], today)
         except Exception as e:
             print(f"{s['sym']}: budget pick failed: {e}")
-            pick = None
-        if pick:
-            parts.append(f"🧮 THE MATH, cheapest options today: {s['sym']} (example only, not a setup)\n"
+            continue
+        if pick and pick["prob"] >= MIN_CHANCE:
+            parts.append(f"🧮 THE MATH, example with cheap options today: {s['sym']} (an example, not a setup)\n"
                          + budget_text(s["sym"], "call", s["price"], pick, today))
+            break
     parts.append("Alerts only, not advice. Never risk money you can't lose.")
     return "\n\n".join(parts)
 
