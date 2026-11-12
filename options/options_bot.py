@@ -454,6 +454,9 @@ IMPACT = [
     (r"\bceo\b|resign|steps down|ousted|exit|succession", "A leadership shake-up means big swings, and big swings mean option opportunities."),
     (r"upgrade|raises? .*target|outperform", "Analyst upgrade: can push the stock up."),
     (r"downgrade|cuts? .*target|underperform", "Analyst downgrade: can push the stock down."),
+    (r"price target|\\bpt\\b", "Analysts changed their price target. That can push the stock either way."),
+    (r"crash|plunge|tumble|slide|sink|selloff|sell-off", "Big drop. It can bounce back (call) or keep falling (put). Watch for a setup."),
+    (r"surge|soar|rall(y|ies)|jump|record high", "Big jump. Watch if it holds or fades before buying anything."),
     (r"acquir|merger|buyout|takeover|\bdeal\b", "Deal news can make a stock jump fast."),
     (r"lawsuit|probe|investigat|antitrust|\bsec\b|\bban\b|export|tariff|china", "Government or legal pressure can push the stock down."),
     (r"\bai\b|chip|data center", "AI news drives tech stocks like NVDA, AMD and QQQ."),
@@ -496,7 +499,7 @@ def why_it_matters(n, pct=None):
     why = next((w for pat, w in IMPACT if re.search(pat, t)), None)
     who = "the market" if n["sym"] in ("SPY", "QQQ") else n["sym"]
     if why is None:
-        why = f"Could move {who}."
+        why = f"Worth a look before you trade {who}."
     if pct is not None:
         why = f"{'SPY' if who == 'the market' else who} is {pct:+.1f}% today. " + why
     return why
