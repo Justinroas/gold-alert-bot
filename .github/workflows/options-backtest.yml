@@ -2,6 +2,11 @@ name: Options strategy replay
 
 on:
   workflow_dispatch:
+    inputs:
+      tickers:
+        description: "Comma-separated tickers to compare (empty = detailed SPY report)"
+        type: string
+        default: ""
 
 jobs:
   replay:
@@ -13,3 +18,5 @@ jobs:
           python-version: "3.12"
       - run: pip install -r options/requirements.txt
       - run: python options/backtest_spy.py
+        env:
+          TICKERS: ${{ inputs.tickers }}
