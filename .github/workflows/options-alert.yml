@@ -15,6 +15,10 @@ on:
         type: choice
         options: ["", "brief", "scan", "all"]
         default: ""
+      dry_run:
+        description: "Only print the alerts in the log (don't send)"
+        type: boolean
+        default: false
 
 concurrency: options-alert
 
@@ -54,6 +58,7 @@ jobs:
           OPTIONS_TELEGRAM_CHAT_ID: ${{ secrets.OPTIONS_TELEGRAM_CHAT_ID }}
           GOLD_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           FORCE: ${{ inputs.force }}
+          DRY_RUN: ${{ inputs.dry_run && '1' || '' }}
           STATE_FILE: .state/options.json
       - if: steps.gate.outputs.go && always()
         uses: actions/cache/save@v4
