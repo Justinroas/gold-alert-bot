@@ -15,9 +15,6 @@ on:
         type: choice
         options: ["", "brief", "scan", "all"]
         default: ""
-  push:
-    branches: [claude/project-thread-auuwho]
-    paths: ["options/**", ".github/workflows/options-alert.yml"]
 
 concurrency: options-alert
 
@@ -29,8 +26,7 @@ jobs:
         id: gate
         run: |
           d=$(TZ=America/New_York date +%u); t=$(TZ=America/New_York date +%H%M)
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event_name }}" = "push" ] \
-             || { [ "$d" -le 5 ] && (( 10#$t >= 840 && 10#$t <= 1610 )); }; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || { [ "$d" -le 5 ] && (( 10#$t >= 840 && 10#$t <= 1610 )); }; then
             echo "go=1" >> "$GITHUB_OUTPUT"
           else
             echo "Outside market hours, nothing to do."
@@ -55,8 +51,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           OPTIONS_TELEGRAM_CHAT_ID: ${{ secrets.OPTIONS_TELEGRAM_CHAT_ID }}
-          FORCE: ${{ github.event_name == 'push' && 'all' || inputs.force }}
-          DRY_RUN: ${{ github.event_name == 'push' && '1' || '' }}
+          FORCE: ${{ inputs.force }}
           STATE_FILE: .state/options.json
       - if: steps.gate.outputs.go && always()
         uses: actions/cache/save@v4
