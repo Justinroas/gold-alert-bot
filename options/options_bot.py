@@ -403,8 +403,13 @@ def build_big_bet_alert(b, price):
 
 # ---------- Telegram ----------
 
+def TOKEN():
+    """Its own options bot if set up, else the gold bot account (just the messenger)."""
+    return os.environ.get("OPTIONS_TELEGRAM_BOT_TOKEN") or os.environ.get("TELEGRAM_BOT_TOKEN", "")
+
+
 def tg(method, **params):
-    r = requests.post(f"https://api.telegram.org/bot{os.environ['TELEGRAM_BOT_TOKEN']}/{method}",
+    r = requests.post(f"https://api.telegram.org/bot{TOKEN()}/{method}",
                       data=params, timeout=30)
     r.raise_for_status()
     return r.json()
@@ -416,7 +421,7 @@ def find_chat_id(state):
     cid = os.environ.get("OPTIONS_TELEGRAM_CHAT_ID") or state.get("chat_id")
     if cid:
         return cid
-    if not os.environ.get("TELEGRAM_BOT_TOKEN"):
+    if not TOKEN():
         return None
     gold = os.environ.get("GOLD_CHAT_ID", "")
     for u in reversed(tg("getUpdates").get("result", [])):
@@ -439,14 +444,14 @@ def send(text, chat_id, state=None):
             cut = chunk.rfind("\n")
             if cut > 0:
                 chunk, text = chunk[:cut], chunk[cut + 1:] + text
-        r = requests.post(f"https://api.telegram.org/bot{os.environ['TELEGRAM_BOT_TOKEN']}/sendMessage",
+        r = requests.post(f"https://api.telegram.org/bot{TOKEN()}/sendMessage",
                           data=dict(chat_id=chat_id, text=chunk, disable_web_page_preview="true"), timeout=30)
         new_id = (r.json().get("parameters") or {}).get("migrate_to_chat_id") if r.status_code == 400 else None
         if new_id:  # Telegram upgraded the group to a supergroup: new id, send again
             chat_id = str(new_id)
             if state is not None:
                 state["chat_id"] = chat_id
-            r = requests.post(f"https://api.telegram.org/bot{os.environ['TELEGRAM_BOT_TOKEN']}/sendMessage",
+            r = requests.post(f"https://api.telegram.org/bot{TOKEN()}/sendMessage",
                               data=dict(chat_id=chat_id, text=chunk, disable_web_page_preview="true"), timeout=30)
         r.raise_for_status()
     return chat_id

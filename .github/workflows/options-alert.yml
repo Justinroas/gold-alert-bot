@@ -50,6 +50,7 @@ jobs:
         run: python options/options_bot.py
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          OPTIONS_TELEGRAM_BOT_TOKEN: ${{ secrets.OPTIONS_TELEGRAM_BOT_TOKEN }}
           OPTIONS_TELEGRAM_CHAT_ID: ${{ secrets.OPTIONS_TELEGRAM_CHAT_ID }}
           GOLD_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           FORCE: ${{ inputs.force }}
