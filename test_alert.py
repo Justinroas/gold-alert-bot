@@ -82,7 +82,8 @@ def test_main_alerts_once_then_entry(monkeypatch, tmp_path):
     bars, now = make(2012, 2013, 2003)
     sent = []
     monkeypatch.setattr(alert, "get_bars", lambda: bars)
-    monkeypatch.setattr(alert, "send_telegram", sent.append)
+    monkeypatch.setattr(alert, "send_telegram", lambda m, footer=True: sent.append(m))
+    monkeypatch.setattr(alert.gold_news, "news_messages", lambda now, state: [])
     monkeypatch.setattr(alert, "get_bars_5min", lambda: [])
     class D(datetime):
         @classmethod
@@ -179,3 +180,52 @@ def test_raja_range_breakout_after_big_move():
     es = [e for e in raja.find_entries(bars, now) if "Range breakout" in e["setup"]]
     assert es and es[0]["side"] == "BUY" and es[0]["entry"] == 4011
     assert "Range breakout" in raja.format_raja(es[0])
+
+
+# ---- gold news ----
+import gold_news as gn
+
+
+def _ny(y, m, d, h, mi):
+    return _dt(y, m, d, h, mi, tzinfo=_NY)
+
+
+def test_gold_news_brief_and_warning():
+    st = {}
+    cpi_day = _ny(2026, 12, 10, 7, 5)
+    msgs = gn.news_messages(cpi_day.astimezone(_Z("UTC")), st, fetch=lambda: [], fetch_cal=lambda: [])
+    assert msgs[0].startswith("🗓 GOLD NEWS TODAY") and "Inflation report (CPI) at 8:30 AM" in msgs[0]
+    assert gn.news_messages(cpi_day.astimezone(_Z("UTC")), st, fetch=lambda: [], fetch_cal=lambda: []) == []  # no repeat
+    warn = gn.news_messages(_ny(2026, 12, 10, 8, 12).astimezone(_Z("UTC")), st, fetch=lambda: [], fetch_cal=lambda: [])
+    assert len(warn) == 1 and warn[0].startswith("⚠️ BIG NEWS IN 18 MIN")
+    assert gn.news_messages(_ny(2026, 12, 10, 8, 18).astimezone(_Z("UTC")), st, fetch=lambda: [], fetch_cal=lambda: []) == []
+
+
+def test_gold_news_no_brief_late_or_weekend():
+    assert gn.news_messages(_ny(2026, 11, 13, 14, 0).astimezone(_Z("UTC")), {}, fetch=lambda: [], fetch_cal=lambda: []) == []
+    assert gn.news_messages(_ny(2026, 11, 14, 7, 30).astimezone(_Z("UTC")), {}, fetch=lambda: [], fetch_cal=lambda: []) == []
+
+
+def test_gold_news_headlines():
+    now = _ny(2026, 11, 16, 12, 5)
+    ts = now.timestamp()
+    items = [dict(title="Gold climbs as Fed rate cut bets grow", source="Reuters", link="https://x", ts=ts - 600, sym="GC=F"),
+             dict(title="5 dividend stocks to buy forever", source="", link="", ts=ts - 60, sym="GLD"),
+             dict(title="Gold climbs as Fed rate cut bets grow", source="Reuters", link="https://x", ts=ts - 600, sym="GLD"),
+             dict(title="Old gold story", source="", link="", ts=ts - 20 * 3600, sym="GC=F")]
+    st = {"news": {"brief": "2026-11-16"}}
+    msgs = gn.news_messages(now.astimezone(_Z("UTC")), st, fetch=lambda: items, fetch_cal=lambda: [])
+    assert len(msgs) == 1 and msgs[0].startswith("📰 GOLD NEWS\nGold climbs") and "biggest gold driver" in msgs[0]
+
+
+def test_gold_news_forex_factory():
+    ff = [dict(when="2026-11-17T08:30:00-05:00", title="Core Retail Sales m/m", impact="High", forecast="0.3%", previous="0.5%"),
+          dict(when="2026-11-17T10:00:00-05:00", title="NAHB Housing Market Index", impact="Medium", forecast="", previous="37")]
+    st = {}
+    msgs = gn.news_messages(_ny(2026, 11, 17, 7, 2).astimezone(_Z("UTC")), st, fetch=lambda: [], fetch_cal=lambda: ff)
+    assert "🔴 Core Retail Sales m/m at 8:30 AM (forecast 0.3%, last 0.5%)" in msgs[0]
+    assert "🟠 NAHB Housing Market Index at 10:00 AM" in msgs[0]
+    warn = gn.news_messages(_ny(2026, 11, 17, 8, 12).astimezone(_Z("UTC")), st, fetch=lambda: [], fetch_cal=lambda: ff)
+    assert len(warn) == 1 and "Core Retail Sales" in warn[0] and "Expected: forecast 0.3%" in warn[0]
+    # the medium event gets no warning
+    assert gn.news_messages(_ny(2026, 11, 17, 9, 42).astimezone(_Z("UTC")), st, fetch=lambda: [], fetch_cal=lambda: ff) == []

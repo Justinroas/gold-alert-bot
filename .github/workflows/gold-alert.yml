@@ -12,6 +12,10 @@ on:
         description: "Send a test message even if there is no breakout"
         type: boolean
         default: false
+      force_news:
+        description: "Send news now: brief, headlines or all"
+        type: string
+        default: ""
 
 concurrency: gold-alert
 
@@ -36,6 +40,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TWELVEDATA_API_KEY: ${{ secrets.TWELVEDATA_API_KEY }}
           FORCE_MESSAGE: ${{ inputs.force_message }}
+          FORCE_NEWS: ${{ inputs.force_news }}
       - uses: actions/cache/save@v4
         if: always()
         with:

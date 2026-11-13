@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
+import gold_news
 import raja
 
 NY = ZoneInfo("America/New_York")
@@ -192,10 +193,11 @@ def get_bars():
     return spot
 
 
-def send_telegram(text):
+def send_telegram(text, footer=True):
     r = requests.post(f"https://api.telegram.org/bot{os.environ['TELEGRAM_BOT_TOKEN']}/sendMessage",
                       data={"chat_id": os.environ["TELEGRAM_CHAT_ID"],
-                            "text": text + "\n\nAlert only, not financial advice."}, timeout=30)
+                            "text": text + ("\n\nAlert only, not financial advice." if footer else ""),
+                            "disable_web_page_preview": "true"}, timeout=30)
     r.raise_for_status()
 
 
@@ -241,12 +243,20 @@ def main():
         state["raja_sent"] = sent[-50:]
     except Exception as exc:  # one strategy failing must not block the other
         print(f"Raja check failed: {exc}")
+    news = []
+    try:
+        news = gold_news.news_messages(now, state)
+    except Exception as exc:  # news must never block trade alerts
+        print(f"News check failed: {exc}")
     save_state(state)
+    for msg in news:
+        print(msg)
+        send_telegram(msg, footer=False)
     if not messages and os.environ.get("FORCE_MESSAGE", "").lower() == "true":
         last = bars[-1] if bars else None
         messages.append("ℹ️ Gold bot test: connected and working. No breakout right now." + (
             f"\nLatest {'XAU/USD' if os.environ.get('TWELVEDATA_API_KEY') else 'gold futures'} price: ${last['close']:,.2f}" if last else ""))
-    if not messages:
+    if not messages and not news:
         print("Nothing to alert.")
     for msg in messages:
         print(msg)
