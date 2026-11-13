@@ -206,3 +206,18 @@ def test_sec_filings_and_ipos():
     rows = ob.ipo_rows(df, date(2026, 11, 12))
     assert [r["sym"] for r in rows] == ["BIG"]
     assert "raising about $1.2B" in ob.build_ipo_upcoming(rows[0]) and "Nov 20" in ob.build_ipo_upcoming(rows[0])
+
+
+def test_company_numbers():
+    q = lambda y, m, d, v: dict(start=(date(y, m, d) - __import__("datetime").timedelta(days=91)).isoformat(),
+                                end=date(y, m, d).isoformat(), val=v)
+    facts = {"facts": {"us-gaap": {
+        "Revenues": {"units": {"USD": [q(2025, 9, 30, 1382e6), q(2025, 12, 31, 2040e6), q(2026, 3, 31, 4731e6),
+                                       q(2026, 6, 30, 11555e6), q(2026, 9, 30, 16956e6),
+                                       dict(start="2025-01-01", end="2025-12-31", val=4585e6)]}},
+        "NetIncomeLoss": {"units": {"USD": [q(2026, 9, 30, -23291e6), dict(start="2025-01-01", end="2025-12-31", val=-41965e6)]}}}}}
+    line = ob.facts_numbers(facts)
+    assert line.startswith("📊 Last quarter (Sep 2026): sales $17.0B (+1127% vs a year ago), loss $23.3B")
+    assert "$2.0B → $4.7B → $11.6B → $17.0B" in line and "Full year 2025: sales $4.6B, loss $42.0B" in line
+    assert ob.fmt_b(-567e6) == "-$567M"
+    assert "📊 Last quarter" in ob.build_news(dict(sym="NVDA", title="t", source="", link=""), None, "📊 Last quarter x")

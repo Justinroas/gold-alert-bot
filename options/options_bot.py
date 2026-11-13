@@ -520,17 +520,82 @@ def pick_news(items, seen, now_ts, count=NEWS_COUNT):
     return out
 
 
-def build_news(n, pct=None):
+def build_news(n, pct=None, nums=None):
     """One headline per message, in the same style as the trade alerts."""
     who = "" if n["sym"] in ("SPY", "QQQ") else f" · {n['sym']}"
     src = f" ({n['source']})" if n["source"] else ""
     lines = [f"📰 MARKET NEWS{who}", f"{n['title']}{src}", f"Why it matters: {why_it_matters(n, pct)}"]
+    if nums:
+        lines.append(nums)
     if n["link"]:
         lines.append(n["link"])
     return "\n".join(lines)
 
 
 # ---------- market data (Yahoo Finance via yfinance) ----------
+
+# ---------- company numbers (sales, profit) ----------
+def fmt_b(x):
+    a = abs(x)
+    s = f"${a / 1e9:.1f}B" if a >= 1e9 else f"${a / 1e6:.0f}M"
+    return ("-" if x < 0 else "") + s
+
+
+def quarters_from_facts(points):
+    """SEC XBRL points (dict start, end, val) -> {end_date: val} for ~3-month periods, plus full years."""
+    q, y = {}, {}
+    for p in points:
+        try:
+            a, b = date.fromisoformat(p["start"]), date.fromisoformat(p["end"])
+        except Exception:
+            continue
+        days = (b - a).days
+        if 80 <= days <= 100:
+            q[b] = p["val"]
+        elif 350 <= days <= 380:
+            y[b] = p["val"]
+    return q, y
+
+
+def numbers_line(rev_q, ni_q, rev_y=None, ni_y=None):
+    """rev_q / ni_q: {quarter_end: value}. Returns a short '📊' summary or None."""
+    if not rev_q:
+        return None
+    ends = sorted(rev_q)
+    last = ends[-1]
+    ago = next((e for e in ends if abs((last - e).days - 365) <= 20), None)
+    out = [f"📊 Last quarter ({last.strftime('%b %Y')}): sales {fmt_b(rev_q[last])}"]
+    if ago and rev_q[ago] > 0:
+        out[0] += f" ({(rev_q[last] / rev_q[ago] - 1) * 100:+.0f}% vs a year ago)"
+    if last in (ni_q or {}):
+        ni = ni_q[last]
+        out[0] += f", {'profit' if ni >= 0 else 'loss'} {fmt_b(abs(ni))}"
+    if len(ends) >= 4:
+        out.append("Last 4 quarters of sales: " + " → ".join(fmt_b(rev_q[e]) for e in ends[-4:]))
+    if rev_y:
+        yr = max(rev_y)
+        line = f"Full year {yr.year}: sales {fmt_b(rev_y[yr])}"
+        if ni_y and yr in ni_y:
+            line += f", {'profit' if ni_y[yr] >= 0 else 'loss'} {fmt_b(abs(ni_y[yr]))}"
+        out.append(line)
+    return "\n".join(out)
+
+
+REV_TAGS = ["Revenues", "RevenueFromContractWithCustomerExcludingAssessedTax", "SalesRevenueNet"]
+
+
+def facts_numbers(facts):
+    """Sales and profit from an SEC companyfacts file."""
+    g = facts.get("facts", {}).get("us-gaap", {})
+    pts = lambda tag: g.get(tag, {}).get("units", {}).get("USD", [])
+    rev_q, rev_y = {}, {}
+    for tag in REV_TAGS:
+        q, y = quarters_from_facts(pts(tag))
+        if q and (not rev_q or max(q) > max(rev_q)):
+            rev_q, rev_y = q, y
+    ni_q, ni_y = quarters_from_facts(pts("NetIncomeLoss"))
+    return numbers_line(rev_q, ni_q, rev_y, ni_y)
+
 
 # ---------- SEC filings (straight from the companies) and upcoming IPOs ----------
 SEC_UA = os.environ.get("SEC_CONTACT") or "gold-alert-bot (github.com/Justinroas/gold-alert-bot)"
@@ -589,7 +654,7 @@ def parse_8k(sub, sym, cik):
     return out
 
 
-def build_filing(f, pct=None):
+def build_filing(f, pct=None, nums=None):
     keep = [x for x in f["items"] if x in SEC_ITEMS]
     if not keep:
         return None
@@ -601,7 +666,7 @@ def build_filing(f, pct=None):
         why = f"{f['sym']} is {pct:+.1f}% today. " + why
     when = f["when"].astimezone(NY).strftime("%-I:%M%p").lower()
     return "\n".join([f"📄 COMPANY FILING · {f['sym']}", f"{f['sym']} officially {what} ({when}, SEC filing).",
-                      f"Why it matters: {why}", f["link"]])
+                      f"Why it matters: {why}"] + ([nums] if nums else []) + [f["link"]])
 
 
 def parse_ipo_feed(xml):
@@ -623,14 +688,36 @@ def famous(name):
     return next((w for w in IPO_WATCH if f" {w} " in n or n.strip().startswith(w + " ")), None)
 
 
-def build_ipo_filing(f):
+def sec_ipo_numbers(cik):
+    try:
+        return facts_numbers(sec_get(f"https://data.sec.gov/api/xbrl/companyfacts/CIK{int(cik):010d}.json").json())
+    except Exception as e:
+        print(f"SEC numbers for {cik}: {e}")
+        return None
+
+
+def sec_find_cik(name):
+    """CIK of a company that filed an S-1/F-1, from SEC full-text search (best effort)."""
+    try:
+        r = sec_get("https://efts.sec.gov/LATEST/search-index?q=" + requests.utils.quote(f'"{name}"')
+                    + "&forms=S-1,S-1/A,F-1,F-1/A").json()
+        for h in r.get("hits", {}).get("hits", []):
+            ciks = h.get("_source", {}).get("ciks") or []
+            if ciks:
+                return ciks[0]
+    except Exception as e:
+        print(f"SEC search for {name}: {e}")
+    return None
+
+
+def build_ipo_filing(f, nums=None):
     amend = f["form"].endswith("/A")
     name = f["name"].title() if f["name"].isupper() else f["name"]
     what = "updated its paperwork to go public (usually means the IPO is getting close)" if amend \
         else "officially filed to go public (IPO)"
     return "\n".join([f"🚀 IPO NEWS · {name}", f"{name} {what}.",
                       "Why it matters: Big IPOs bring hype. Related stocks can move, and the new stock gets"
-                      " options a few days after it starts trading.", f["link"]])
+                      " options a few days after it starts trading."] + ([nums] if nums else []) + [f["link"]])
 
 
 def ipo_rows(df, today, days=IPO_DAYS):
@@ -667,7 +754,7 @@ def ipo_rows(df, today, days=IPO_DAYS):
     return sorted(out, key=lambda x: x["date"])
 
 
-def build_ipo_upcoming(x):
+def build_ipo_upcoming(x, nums=None):
     rng = ""
     try:
         rng = f", priced around ${float(x['lo']):.0f}-${float(x['hi']):.0f} a share" if x["lo"] and x["hi"] else ""
@@ -679,7 +766,7 @@ def build_ipo_upcoming(x):
     return "\n".join([f"🚀 UPCOMING IPO · {x['name']}{tick}",
                       f"Expected to start trading {nice_date(x['date'])}{rng}{size}.",
                       "Why it matters: Big IPOs bring hype and big swings. Options on it usually show up a few"
-                      " days after it starts trading."])
+                      " days after it starts trading."] + ([nums] if nums else []))
 
 
 def check_sec(state, watch, now, say, mkt=None, force=False):
@@ -708,7 +795,7 @@ def check_sec(state, watch, now, say, mkt=None, force=False):
                     pct = (d[-1][1] / d[-2][1] - 1) * 100
             except Exception:
                 pass
-            text = build_filing(f, pct)
+            text = build_filing(f, pct, mkt.numbers(sym) if mkt else None)
             print(f"SEC {sym} {f['acc']} items={f['items']} -> {'alert' if text else 'skip'}")
             if text:
                 say(text)
@@ -726,7 +813,7 @@ def check_sec(state, watch, now, say, mkt=None, force=False):
                 continue
             seen.append(key)
             if famous(f["name"]) and not first:
-                say(build_ipo_filing(f))
+                say(build_ipo_filing(f, sec_ipo_numbers(f["cik"])))
                 sent_any += 1
     except Exception as e:
         print(f"SEC IPO feed failed: {e}")
@@ -745,7 +832,8 @@ def check_ipo_calendar(state, today, say, force=False):
         if told.get(k) == x["date"].isoformat() and not force:
             continue
         told[k] = x["date"].isoformat()
-        say(build_ipo_upcoming(x))
+        cik = sec_find_cik(x["name"])
+        say(build_ipo_upcoming(x, sec_ipo_numbers(cik) if cik else None))
     for k in [k for k, d in told.items() if d < (today - timedelta(days=7)).isoformat()]:
         del told[k]
     return rows
@@ -804,6 +892,23 @@ class Market:
         except Exception:
             return []
         return [n for n in (parse_news(it, sym) for it in items) if n]
+
+    def numbers(self, sym):
+        """Quarterly sales and profit from Yahoo, as a '📊' line (None for ETFs or no data)."""
+        if sym in ETFS:
+            return None
+        if ("num", sym) in self._t:
+            return self._t[("num", sym)]
+        line = None
+        try:
+            df = self.t(sym).quarterly_income_stmt
+            row = lambda name: {c.date(): float(df.loc[name, c]) for c in df.columns
+                                if name in df.index and df.loc[name, c] == df.loc[name, c]}
+            line = numbers_line(row("Total Revenue"), row("Net Income"))
+        except Exception as e:
+            print(f"{sym}: numbers failed: {e}")
+        self._t[("num", sym)] = line
+        return line
 
     def headline(self, sym):
         try:
@@ -1102,6 +1207,11 @@ def main():
     for k in [k for k in sent if not k.startswith(day)]:
         del sent[k]
 
+    if FORCE == "message" and os.environ.get("MESSAGE"):
+        send(os.environ["MESSAGE"].replace("\\n", "\n"), chat_id, state)
+        save_state(state)
+        return
+
     if FORCE == "guide":
         send(GUIDE, chat_id, state)
         save_state(state)
@@ -1185,7 +1295,7 @@ def main():
                         pct = (d[-1][1] / d[-2][1] - 1) * 100
                 except Exception:
                     pass
-                chat_id = send(build_news(n, pct), None if quiet else chat_id, state) or chat_id
+                chat_id = send(build_news(n, pct, mkt.numbers(n["sym"])), None if quiet else chat_id, state) or chat_id
             if pick:
                 state["news_seen"] = {day: sorted(seen | {n["title"].lower() for n in pick})}
         except Exception as e:
