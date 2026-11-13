@@ -13,7 +13,11 @@ on:
       force:
         description: "Run now and send: brief, scan, all, or samples (3 test alerts)"
         type: choice
-        options: ["", "brief", "scan", "dip", "news", "sec", "all", "samples", "guide"]
+        options: ["", "brief", "scan", "dip", "news", "sec", "all", "message", "samples", "guide"]
+        default: ""
+      message:
+        description: "Text to send when force = message"
+        type: string
         default: ""
       dry_run:
         description: "Only print the alerts in the log (don't send)"
@@ -58,6 +62,7 @@ jobs:
           OPTIONS_TELEGRAM_CHAT_ID: ${{ secrets.OPTIONS_TELEGRAM_CHAT_ID }}
           GOLD_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SEC_CONTACT: ${{ secrets.SEC_CONTACT }}
+          MESSAGE: ${{ inputs.message }}
           FORCE: ${{ inputs.force }}
           DRY_RUN: ${{ inputs.dry_run && '1' || '' }}
           STATE_FILE: .state/options.json
