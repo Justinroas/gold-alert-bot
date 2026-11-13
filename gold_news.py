@@ -38,7 +38,7 @@ NEWS_TICKERS = ["GC=F", "GLD"]
 
 GOLD_WORDS = (r"gold|bullion|precious metal|xau|\bfed\b|powell|rate cut|rate hike|interest rate|dollar"
               r"|inflation|\bcpi\b|payroll|jobs report|treasury yield|central bank|safe.haven|tariff")
-JUNK = r"retire|\bira\b|401\(k\)|should you buy|stocks? to buy|best .*stock|my top|coin dealer|jewel"
+JUNK = r"^bc-|retire|\bira\b|401\(k\)|should you buy|stocks? to buy|best .*stock|my top|coin dealer|jewel"
 WHY = [
     (r"\bfed\b|powell|rate cut|rate hike|interest rate", "Fed and interest rates are the biggest gold driver. Lower rates usually lift gold, higher rates usually push it down."),
     (r"inflation|\bcpi\b|\bppi\b|prices", "Inflation news changes rate-cut hopes. Hot numbers usually hurt gold, cool numbers help it."),
