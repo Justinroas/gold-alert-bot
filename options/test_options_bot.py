@@ -221,3 +221,26 @@ def test_company_numbers():
     assert "$2.0B → $4.7B → $11.6B → $17.0B" in line and "Full year 2025: sales $4.6B, loss $42.0B" in line
     assert ob.fmt_b(-567e6) == "-$567M"
     assert "📊 Last quarter" in ob.build_news(dict(sym="NVDA", title="t", source="", link=""), None, "📊 Last quarter x")
+
+
+def test_daily_setup():
+    from datetime import datetime as dt, timedelta as td
+    now = dt(2026, 11, 18, 9, 52, tzinfo=ob.NY)
+    t0 = dt(2026, 11, 18, 9, 30, tzinfo=ob.NY)
+    px = [100, 100.4, 100.2, 101.0, 101.5]  # first 15 min range 99.8-100.6, then breaks higher
+    bars = [dict(start=t0 + td(minutes=5 * i), open=p - 0.1, high=p + 0.2, low=p - 0.2, close=p) for i, p in enumerate(px)]
+    sig = ob.opening_move(bars[:4], now)
+    assert sig["side"] == "call" and round(sig["move"], 1) == 1.1
+    flat = [dict(b, close=100.1, high=100.3, low=99.9) for b in bars]
+    assert ob.opening_move(flat[:4], now) is None
+
+    class M:
+        def expiries(self, s): return ["2026-11-18", "2026-11-20", "2026-11-27"]
+        def chain(self, s, e):
+            calls = [dict(strike=k, bid=p - 0.05, ask=p + 0.05, lastPrice=p) for k, p in ((100, 4.1), (102, 3.0), (104, 2.2), (108, 0.9))]
+            return calls, []
+    pick = ob.daily_pick(M(), "NVDA", "call", 101.0, now.date())
+    assert pick["expiry"] == "2026-11-20" and pick["strike"] == 102 and abs(pick["premium"] - 3.0) < 0.01
+    text = ob.build_daily_alert("NVDA", sig, pick)
+    assert text.startswith("🎯 DAILY SETUP (📗 BUY CALL) · NVDA") and "1 NVDA $102 call" in text and "($300 total)" in text
+    assert "+30% (about $3.90, +$90)" in text and "sell by 11am" in text

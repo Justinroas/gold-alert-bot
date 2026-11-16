@@ -363,6 +363,123 @@ def build_orb_alert(sig, pick, today):
     return signal_text(sig["side"], "SPY", why, pick, sell)
 
 
+# ---------- Daily setup: one trade a day for a small ($400) account ----------
+# Watch 9:30-9:45, then trade the direction of the opening move on the most liquid names.
+# The user asked for this (2026-11-16). It is NOT backtested like the SPY breakout or the panic dip.
+DAILY_WINDOW = (time(9, 47), time(10, 20))   # pick the setup in this window
+DAILY_GIVE_UP = time(10, 15)                 # still nothing by now: say "no clean setup today"
+DAILY_CLOSE = (time(10, 58), time(11, 20))   # send the close-position reminder
+DAILY_PREMIUM = (2.00, 3.50)                 # option price per share: $200-$350 for 1 contract
+DAILY_TP, DAILY_SL = 0.30, 0.30
+
+
+def opening_move(bars, now):
+    """bars: today's 5-min candles. Returns dict(side, move %, price, hi, lo) when the price is past the
+    first 15 minutes' range in the direction of the open-to-now move, else None."""
+    day_open = datetime.combine(now.date(), time(9, 30), tzinfo=NY)
+    first = [b for b in bars if day_open <= b["start"] < day_open + timedelta(minutes=15)]
+    done = [b for b in bars if b["start"] + ORB_BAR <= now]
+    if len(first) < 3 or len(done) < 4:
+        return None
+    hi, lo = max(b["high"] for b in first), min(b["low"] for b in first)
+    open_px = first[0].get("open", first[0]["close"])
+    price = done[-1]["close"]
+    move = (price / open_px - 1) * 100
+    if move > 0 and price > hi:
+        side = "call"
+    elif move < 0 and price < lo:
+        side = "put"
+    else:
+        return None
+    return dict(side=side, move=move, price=price, hi=hi, lo=lo)
+
+
+def daily_pick(mkt, sym, kind, price, today, lo=DAILY_PREMIUM[0], hi=DAILY_PREMIUM[1]):
+    """Nearest weekly expiry at least 2 days out; the strike closest to the money priced $2.00-$3.50."""
+    for exp in mkt.expiries(sym):
+        days = (datetime.strptime(exp, "%Y-%m-%d").date() - today).days
+        if days < 2 or days > 14:
+            continue
+        calls, puts = mkt.chain(sym, exp)
+        rows = [r for r in (calls if kind == "call" else puts)
+                if r.get("strike") and lo <= premium_of(r) <= hi and (r.get("bid") or 0) > 0]
+        if not rows:
+            continue
+        r = min(rows, key=lambda r: abs(r["strike"] - price))
+        p, k = premium_of(r), r["strike"]
+        years = days / 365
+        iv = implied_vol(kind, p, price, k, years) or 0.3
+        be = k + p if kind == "call" else k - p
+        return dict(strike=k, premium=p, expiry=exp, prob=prob_profit(kind, price, be, years, iv), iv=iv)
+    return None
+
+
+def build_daily_alert(sym, sig, pick):
+    up = sig["side"] == "call"
+    why = (f"{sym} is {'up' if up else 'down'} {abs(sig['move']):.1f}% since the open and broke"
+           f" {'above' if up else 'below'} its first-15-minute range. Trading the direction of the opening move.")
+    lines = [f"🎯 DAILY SETUP ({'📗 BUY CALL' if up else '📕 BUY PUT'}) · {sym}", f"Why: {why}"]
+    if pick:
+        exp = datetime.strptime(pick["expiry"], "%Y-%m-%d").date()
+        cost = pick["premium"] * 100
+        lines.append(f"Buy: 1 {sym} {short_money(pick['strike'])} {sig['side']}, expires {exp.strftime('%b')} {exp.day},"
+                     f" about ${pick['premium']:.2f} ({short_money(cost)} total)")
+        lines.append(f"Close position: at +30% (about ${pick['premium'] * (1 + DAILY_TP):.2f}, +{short_money(cost * DAILY_TP)})"
+                     f" or -30% (about ${pick['premium'] * (1 - DAILY_SL):.2f}, -{short_money(cost * DAILY_SL)}),"
+                     " and sell by 11am no matter what. No overnight holds.")
+        lines.append(f"Risk: {RISK_WORDS[risk_tag(pick['prob'])[0]]} · new strategy, not tested on past data yet")
+    return "\n".join(lines)
+
+
+def build_daily_close(d):
+    return "\n".join([f"⏰ CLOSE POSITION · {d['sym']} {d['side']} (daily setup)",
+                      "It's 11am. If you're still in today's setup, sell it now, win or lose. No overnight holds."])
+
+
+def check_daily(mkt, watch, state, now, say, force=False):
+    today, day = now.date(), now.date().isoformat()
+    d = state.get("daily") or {}
+    if d.get("day") != day:
+        d = {"day": day}
+    t = now.time()
+    if force:
+        d = {"day": day}
+    if not d.get("done") and (force or DAILY_WINDOW[0] <= t <= DAILY_WINDOW[1]):
+        best = None
+        for sym in watch:
+            try:
+                sig = opening_move(mkt.intraday(sym), now)
+            except Exception as e:
+                print(f"{sym}: daily setup check failed: {e}")
+                continue
+            if not sig:
+                continue
+            score = abs(sig["move"]) * (2 if sym in ETFS else 1)  # index ETFs move less: count them double
+            print(f"Daily setup candidate {sym}: {sig['side']} {sig['move']:+.2f}% score {score:.2f}")
+            if best is None or score > best[0]:
+                best = (score, sym, sig)
+        if best:
+            _, sym, sig = best
+            pick = None
+            try:
+                pick = daily_pick(mkt, sym, sig["side"], sig["price"], today)
+            except Exception as e:
+                print(f"{sym}: daily pick failed: {e}")
+            if pick:
+                say(build_daily_alert(sym, sig, pick))
+                d.update(done=True, sym=sym, side=sig["side"])
+            else:
+                print(f"{sym}: no option at $2.00-$3.50")
+        if not d.get("done") and (force or t >= DAILY_GIVE_UP):
+            say("🎯 DAILY SETUP · none today\nNo stock made a clean opening move with an option in the $2-$3.50 range."
+                " Sitting out is a trade too.")
+            d["done"] = True
+    if d.get("sym") and not d.get("closed") and DAILY_CLOSE[0] <= t <= DAILY_CLOSE[1]:
+        say(build_daily_close(d))
+        d["closed"] = True
+    state["daily"] = d
+
+
 # ---------- Panic dip: healthy stock dumped in a scared market -> CALL ----------
 # 10-year replay (options/backtest_daily.py): above 200-day avg, RSI-2 under 10, VIX 20+, buy at the close,
 # sell when it closes above its 5-day avg (about 3 days). Win rates below; both 5-year halves held up.
@@ -865,8 +982,8 @@ class Market:
     def intraday(self, sym):
         """Today's 5-minute candles."""
         df = self.t(sym).history(period="1d", interval="5m", auto_adjust=False).dropna(subset=["Close"])
-        return [dict(start=ts.to_pydatetime().astimezone(NY), high=float(r.High), low=float(r.Low),
-                     close=float(r.Close)) for ts, r in df.iterrows()]
+        return [dict(start=ts.to_pydatetime().astimezone(NY), open=float(r.Open), high=float(r.High),
+                     low=float(r.Low), close=float(r.Close)) for ts, r in df.iterrows()]
 
     def chain(self, sym, expiry):
         ch = self.t(sym).option_chain(expiry)
@@ -1031,6 +1148,7 @@ This chat sends stock options trade ideas on SPY and big stocks (NVDA, TSLA, AAP
 
 ⏰ WHAT YOU'LL GET (weekdays)
 ☀️ 8:45am · Morning brief: big events coming (earnings, Fed, inflation, jobs) and whether options are 🟢 cheap or 🔴 pricey today.
+🎯 ~9:50am · Daily setup: the day's one best trade for a small account (1 contract, $200-$350). Exit at +30% / -30%, out by 11am.
 📈 9:50-11:30am · SPY breakout: SPY breaks out of its first-15-minute range and the fear meter agrees.
 ⚡ All day · Big move: a stock jumps or drops 3%+ and is holding it.
 📰 12pm + 3:30pm · Market news: the top headlines and why they matter to us.
@@ -1300,6 +1418,13 @@ def main():
                 state["news_seen"] = {day: sorted(seen | {n["title"].lower() for n in pick})}
         except Exception as e:
             print(f"News roundup failed: {e}")
+
+    if FORCE in ("daily", "all") or weekday:
+        try:
+            check_daily(mkt, watch, state, now, lambda t: send(t, None if quiet else chat_id, state),
+                        force=FORCE == "daily")
+        except Exception as e:
+            print(f"Daily setup failed: {e}")
 
     if FORCE in ("sec", "all") or weekday:
         say = lambda t: send(t, None if quiet else chat_id, state)
