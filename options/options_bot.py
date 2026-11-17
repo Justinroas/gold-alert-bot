@@ -485,7 +485,7 @@ def check_daily(mkt, watch, state, now, say, force=False):
 # sell when it closes above its 5-day avg (about 3 days). Win rates below; both 5-year halves held up.
 DIP_WIN = {"SPY": 83, "QQQ": 78, "IWM": 78, "META": 89, "AAPL": 87, "MSFT": 86, "NVDA": 79, "AMZN": 77,
            "AMD": 73, "GOOGL": 68, "TSLA": 68, "PLTR": 73, "GLD": 71}
-DIP_CHECK = (time(15, 40), time(15, 58))
+DIP_CHECK = (time(15, 15), time(15, 50))  # early enough to act before the 4pm close
 DIP_MAX_DAYS = 10  # give up and sell after this many trading days
 
 
@@ -521,30 +521,35 @@ def dip_exit(closes, entry_index_from_end):
     return None
 
 
-def dip_pick(mkt, sym, price, today):
-    """At-the-money call 2-5 weeks out: room for the ~3-day bounce without paying for months."""
-    exp = pick_expiry(mkt.expiries(sym), today, lo=14, hi=35, target=21)
-    if not exp:
-        return None
-    calls, _ = mkt.chain(sym, exp)
-    r = nearest_row(calls, price)
-    if not r:
-        return None
-    p = premium_of(r)
-    years = max((datetime.strptime(exp, "%Y-%m-%d").date() - today).days, 1) / 365
-    iv = implied_vol("call", p, price, r["strike"], years)
-    if not p or not iv:
-        return None
-    return dict(strike=r["strike"], premium=p, expiry=exp,
-                prob=prob_profit("call", price, r["strike"] + p, years, iv))
+def dip_pick(mkt, sym, price, today, budget=BUDGET):
+    """The call (7-45 days out) that fits the budget with the best chance of paying off.
+    If nothing fits, returns dict(too_pricey=True, atm_cost=...) so the alert can say so."""
+    pick = budget_pick(mkt, sym, "call", price, today, budget)
+    if pick:
+        return pick
+    atm = None
+    try:
+        exp = pick_expiry(mkt.expiries(sym), today, lo=14, hi=35, target=21)
+        r = nearest_row(mkt.chain(sym, exp)[0], price) if exp else None
+        atm = premium_of(r) * 100 if r else None
+    except Exception:
+        pass
+    return dict(too_pricey=True, atm_cost=atm)
 
 
-def build_dip_alert(sym, price, sig, vix, pick):
+def build_dip_alert(sym, price, sig, vix, pick, budget=BUDGET):
     win = DIP_WIN.get(sym)
     why = (f"Good stock, big 2-day drop (RSI-2: {sig['rsi']:.0f}), and the whole market is scared (VIX: {vix:.0f})."
            f" These usually bounce back in about 3 days"
            + (f" ({win}% of the time over 10 years)." if win else "."))
-    return signal_text("call", sym, why, pick, "I'll tell you (usually in about 3 days). Buy before 4pm today.")
+    sell = "I'll tell you (usually in about 3 days). Buy before 3:55pm today."
+    if pick and pick.get("too_pricey"):
+        cost = f" (the normal call costs about {short_money(pick['atm_cost'])})" if pick.get("atm_cost") else ""
+        return "\n".join([f"📗 BUY CALL · {sym}", f"Why: {why}",
+                          f"Buy: ⚠️ No {sym} call fits a {short_money(budget)} trade{cost}. Skip it,"
+                          f" or buy a share or two of {sym} instead if you want in.",
+                          f"Close position: {sell}"])
+    return signal_text("call", sym, why, pick, sell)
 
 
 def build_dip_exit(sym, price, entry_price, reason):
@@ -1152,7 +1157,7 @@ This chat sends stock options trade ideas on SPY and big stocks (NVDA, TSLA, AAP
 📈 9:50-11:30am · SPY breakout: SPY breaks out of its first-15-minute range and the fear meter agrees.
 ⚡ All day · Big move: a stock jumps or drops 3%+ and is holding it.
 📰 12pm + 3:30pm · Market news: the top headlines and why they matter to us.
-🩸 3:45pm · Panic dip: a strong stock got dumped while the market is scared. Usually bounces within days.
+🩸 ~3:20pm · Panic dip: a strong stock got dumped while the market is scared. Usually bounces within days.
 
 📖 HOW TO READ AN ALERT
 📗 BUY CALL = bet the stock goes UP

@@ -244,3 +244,21 @@ def test_daily_setup():
     text = ob.build_daily_alert("NVDA", sig, pick)
     assert text.startswith("🎯 DAILY SETUP (📗 BUY CALL) · NVDA") and "1 NVDA $102 call" in text and "($300 total)" in text
     assert "+30% (about $3.90, +$90)" in text and "sell by 11am" in text
+
+
+def test_dip_fits_budget():
+    class M:
+        def expiries(self, s): return ["2026-12-04", "2026-12-11"]
+        def chain(self, s, e):
+            return [dict(strike=k, bid=p - 0.05, ask=p + 0.05, lastPrice=p) for k, p in ((505, 18.6), (560, 2.0))], []
+    today = date(2026, 11, 17)
+    pricey = ob.dip_pick(M(), "MSFT", 500.0, today)
+    assert pricey["too_pricey"] and round(pricey["atm_cost"]) == 1860
+    text = ob.build_dip_alert("MSFT", 500.0, dict(rsi=4), 26, pricey)
+    assert "No MSFT call fits a $100 trade (the normal call costs about $1,860)" in text and "3:55pm" in text
+
+    class C(M):
+        def chain(self, s, e):
+            return [dict(strike=k, bid=p - 0.05, ask=p + 0.05, lastPrice=p) for k, p in ((505, 18.6), (530, 0.9))], []
+    ok = ob.dip_pick(C(), "MSFT", 500.0, today)
+    assert ok["strike"] == 530 and "Buy: MSFT $530 call" in ob.build_dip_alert("MSFT", 500.0, dict(rsi=4), 26, ok)
