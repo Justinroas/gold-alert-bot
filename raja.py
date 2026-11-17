@@ -47,6 +47,16 @@ START = time(int(os.environ.get("RAJA_START_HOUR", "18")), 0)   # 6pm: Asia sess
 END = time(int(os.environ.get("RAJA_END_HOUR", "12")), 0)
 
 
+def session_name(ts):
+    """Which trading session a time falls in (New York time)."""
+    h = ts.astimezone(NY).hour
+    if h >= 18 or h < 3:
+        return "🌏 Asia session"
+    if h < 8:
+        return "🇬🇧 London session"
+    return "🗽 New York session"
+
+
 def trading_day(ts):
     """Gold's trading day starts at 6pm New York; a bar at 6pm or later belongs to the next day."""
     return (ts.astimezone(NY) + timedelta(hours=6)).date()
@@ -198,7 +208,7 @@ def format_raja(e):
     icon = "🟢" if e["side"] == "BUY" else "🔴"
     lv = " + ".join(f"{n} ${v:,.2f}" for n, v in e["levels"])
     stop_pips = abs(e["entry"] - e["stop"]) / PIP
-    return (f"{STRATEGY}\n"
+    return (f"{STRATEGY} · {session_name(e['at'])}\n"
             f"{icon} XAU/USD {e['side']} ENTRY ({e['at']:%-I:%M %p} NY), {e['setup']}\n"
             f"Level: {lv}\n"
             f"{e['detail']}\n"

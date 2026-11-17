@@ -7,7 +7,7 @@ Rules:
 2. Breakout: the latest finished candle CLOSES above resistance (BUY) or below support (SELL).
 3. Impulsive: that candle is big (>= IMPULSE_MULT x average size) or has high volume
    (>= IMPULSE_MULT x average volume).
-4. Only for candles that close between 7:00am and 4:00pm New York time.
+4. Only for candles that close between 3:00am (London open) and 4:00pm New York time.
 5. Entry trigger: after a breakout alert, every 5-minute check watches for price to break
    the breakout candle's high (BUY) or low (SELL) and sends an "ENTRY TRIGGERED" alert.
    This watch expires after ENTRY_WINDOW_MIN minutes.
@@ -30,7 +30,7 @@ BOX_BARS = int(os.environ.get("BOX_BARS", "6"))        # 6 candles = 3 hours
 AVG_BARS = int(os.environ.get("AVG_BARS", "20"))
 TIGHT_MULT = float(os.environ.get("TIGHT_MULT", "2.5"))
 IMPULSE_MULT = float(os.environ.get("IMPULSE_MULT", "1.5"))
-START = time(int(os.environ.get("START_HOUR", "7")), 0)
+START = time(int(os.environ.get("START_HOUR", "3")), 0)   # 3am: London session opens
 END = time(int(os.environ.get("END_HOUR", "16")), 0)
 STATE_FILE = ".state/state.json"
 RAJA_FRESH = timedelta(minutes=30)
@@ -79,7 +79,7 @@ def format_alert(a):
     icon = "🟢" if a["side"] == "BUY" else "🔴"
     level = "resistance" if a["side"] == "BUY" else "support"
     trigger = "above" if a["side"] == "BUY" else "below"
-    return (f"{STRATEGY}\n"
+    return (f"{STRATEGY} · {raja.session_name(a['at'])}\n"
             f"{icon} XAU/USD {a['side']} BREAKOUT ({a['at']:%-I:%M %p} NY, 30-min)\n"
             f"Closed {trigger} {level}: ${a['close']:,.2f}\n"
             f"Box: support ${a['bottom']:,.2f} / resistance ${a['top']:,.2f}\n"
@@ -102,10 +102,10 @@ def check_entry(pending, bars5, now):
     return None, None
 
 
-def format_entry(pending, price):
+def format_entry(pending, price, now=None):
     icon = "🚀" if pending["side"] == "BUY" else "🔻"
     word = "above the high" if pending["side"] == "BUY" else "below the low"
-    return (f"{STRATEGY}\n"
+    return (f"{STRATEGY} · {raja.session_name(now or datetime.now(tz=NY))}\n"
             f"{icon} XAU/USD {pending['side']} ENTRY TRIGGERED\n"
             f"Price broke {word} of the breakout candle (${pending['entry']:,.2f}).\n"
             f"Price reached: ${price:,.2f}")
@@ -230,7 +230,7 @@ def main():
     if state.get("pending"):
         result, price = check_entry(state["pending"], get_bars_5min(), now)
         if result == "triggered":
-            messages.append(format_entry(state["pending"], price))
+            messages.append(format_entry(state["pending"], price, now))
         if result:
             state.pop("pending")
     try:
