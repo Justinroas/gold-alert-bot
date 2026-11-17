@@ -274,5 +274,5 @@ def test_lotto():
     assert pick == dict(strike=603, premium=0.22, expiry="2026-11-18")
     assert ob.lotto_pick(M(), "call", 601.0, date(2026, 11, 17)) is None  # no same-day expiry
     text = ob.build_lotto_alert(dict(side="call", stop=600.0), pick)
-    assert text.startswith("🎰 LOTTERY TICKET · SPY CALL, expires TODAY") and "1 SPY $603 call" in text
-    assert "($22 total)" in text and "about $0.44 (2x)" in text and "by 3pm" in text
+    assert text.startswith("🎰 LOTTERY TICKET · SPY CALL, expires TODAY") and "Buy: SPY $603 call" in text
+    assert "($22 per contract)" in text and "about $0.44 (2x)" in text and "by 3pm" in text
