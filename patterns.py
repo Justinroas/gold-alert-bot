@@ -19,7 +19,7 @@ from zoneinfo import ZoneInfo
 import raja
 
 NY = ZoneInfo("America/New_York")
-STRATEGY = "📙 Strategy: Chart patterns (video)"
+STRATEGY = "📙 Strategy: Sensei"
 ENABLED = os.environ.get("PATTERNS", "on") == "on"
 # Setups that send alerts. The 53-day replay: double top +65 pips, liquidity sweep +65,
 # double bottom -140, trend + order block too few to tell. Others still run in the replay.

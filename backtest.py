@@ -116,7 +116,7 @@ def patterns_replay():
             e["result"] = raja.outcome(e, bars[n:n + 32])
             found.append(e)
     days = len({raja.trading_day(b["start"]) for b in bars})
-    out = ["", f"## Replay: chart patterns from the video (15-min, 3am-4pm NY, {days} trading days)", "",
+    out = ["", f"## Replay: Sensei (chart patterns from the video) (15-min, 3am-4pm NY, {days} trading days)", "",
            "| Setup | Entries | TP2 | TP1 then stop | SL | Unclear | Open | Net pips |", "|---|---|---|---|---|---|---|---|"]
     def net(g):
         tot = 0
