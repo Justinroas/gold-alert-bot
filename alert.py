@@ -124,10 +124,10 @@ def _yahoo_bars(ticker, interval="30min"):
                  close=float(r.Close), volume=float(r.Volume)) for ts, r in df.dropna().iterrows()]
 
 
-def _spot_bars(api_key, interval="30min", outputsize=100):
-    """XAU/USD spot 30-min candles from Twelve Data (free key). Spot gold has no real volume."""
+def _spot_bars(api_key, interval="30min", outputsize=100, symbol="XAU/USD"):
+    """Spot candles from Twelve Data (free key), XAU/USD unless told otherwise. No real volume."""
     r = requests.get("https://api.twelvedata.com/time_series",
-                     params=dict(symbol="XAU/USD", interval=interval, outputsize=outputsize,
+                     params=dict(symbol=symbol, interval=interval, outputsize=outputsize,
                                  timezone="UTC", apikey=api_key), timeout=30)
     r.raise_for_status()
     data = r.json()
@@ -250,7 +250,13 @@ def main():
     try:
         if patterns.ENABLED:
             sent = state.get("pattern_sent", [])
-            for e in patterns.find_entries(bars15 if bars15 is not None else get_bars_15min(), now):
+            if patterns.SYMBOL == "XAU/USD":
+                pbars = bars15 if bars15 is not None else get_bars_15min()
+            elif patterns.in_hours(now):  # only spend Twelve Data credits while Sensei is on
+                pbars = _spot_bars(os.environ["TWELVEDATA_API_KEY"], "15min", 120, patterns.SYMBOL)
+            else:
+                pbars = []
+            for e in patterns.find_entries(pbars, now):
                 k = patterns.entry_key(e)
                 if e["setup"] in patterns.LIVE_SETUPS and k not in sent and now - e["at"] <= RAJA_FRESH:
                     sent.append(k)

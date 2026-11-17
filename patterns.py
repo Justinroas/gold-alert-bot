@@ -9,8 +9,11 @@ The video shows 4 chart pictures and says buy or sell for each:
    between them -> SELL. (Mirror: double bottom, close above resistance -> BUY.)
 
 Order block = the last opposite-colour candle before the strong move that broke structure.
-Stop loss just past the order block (or the second top), capped at MAX_STOP. Take profit uses
-the same 35 / 55 pips as the Raja strategy.
+Stop loss just past the order block (or the second top), capped at MAX_STOP pips, then
+two take profits in pips.
+
+The video was made for EUR/USD (the euro), so Sensei watches EUR/USD by default
+(PATTERN_SYMBOL). The alerts still go to the Gold Alerts group, clearly marked 💶 EUR/USD.
 """
 import os
 from datetime import time, timedelta
@@ -20,12 +23,19 @@ import raja
 
 NY = ZoneInfo("America/New_York")
 STRATEGY = "📙 Strategy: Sensei"
+SYMBOL = os.environ.get("PATTERN_SYMBOL", "EUR/USD")
+EURO = SYMBOL == "EUR/USD"
+LABEL = "💶 EUR/USD (euro, not gold)" if EURO else "XAU/USD"
+PIP = 0.0001 if EURO else 0.10
+TP1_PIPS = float(os.environ.get("PATTERN_TP1_PIPS", "15" if EURO else "35"))
+TP2_PIPS = float(os.environ.get("PATTERN_TP2_PIPS", "30" if EURO else "55"))
+MAX_STOP_PIPS = float(os.environ.get("PATTERN_MAX_STOP_PIPS", "20" if EURO else "50"))
+STOP_BUFFER_PIPS = 2 if EURO else 5
 ENABLED = os.environ.get("PATTERNS", "on") == "on"
 # Setups that send alerts. The 53-day replay: double top +65 pips, liquidity sweep +65,
 # double bottom -140, trend + order block too few to tell. Others still run in the replay.
 LIVE_SETUPS = set(os.environ.get("PATTERN_SETUPS", "Double top,Liquidity sweep + order block").split(","))
 BAR = timedelta(minutes=15)
-PIP = 0.10
 SWING = 2                 # a swing high is higher than the 2 candles on each side
 LOOKBACK = 64             # candles of history to look at (16 hours)
 OB_MAX_AGE = 16           # an order block is only good for 4 hours
@@ -56,13 +66,32 @@ def _order_block(bars, start, end, side):
     return None
 
 
+def in_hours(now):
+    """True while Sensei is watching (weekdays, START to END New York time, plus 15 min)."""
+    t = now.astimezone(NY)
+    return t.weekday() < 5 and START <= t.time() <= (END if END.hour == 23 else time(END.hour, 20))
+
+
 def _in_session(b):
     t = (b["start"] + BAR).astimezone(NY).time()
     return START < t <= END
 
 
+def px(v):
+    """Price as text: euro to 5 decimals, gold in dollars."""
+    return f"{v:.5f}" if EURO else f"${v:,.2f}"
+
+
 def _entry(side, entry, extreme, at, setup, detail):
-    return raja._make(side, entry, extreme, at, [], setup, detail)
+    buf, cap = STOP_BUFFER_PIPS * PIP, MAX_STOP_PIPS * PIP
+    if side == "BUY":
+        stop = max(extreme - buf, entry - cap)
+        tp1, tp2 = entry + TP1_PIPS * PIP, entry + TP2_PIPS * PIP
+    else:
+        stop = min(extreme + buf, entry + cap)
+        tp1, tp2 = entry - TP1_PIPS * PIP, entry - TP2_PIPS * PIP
+    return dict(side=side, entry=entry, stop=stop, tp1=tp1, tp2=tp2, at=at,
+                levels=[], setup=setup, detail=detail)
 
 
 def check_last(bars):
@@ -88,7 +117,7 @@ def check_last(bars):
             top = max(hist[a]["high"], hist[b]["high"])
             if last["close"] < neck <= bars[-2]["close"] and max(x["high"] for x in bars[b + 1:]) < top:
                 out.append(_entry("SELL", last["close"], top, at, "Double top",
-                                  f"Two tops at about ${top:,.2f}, then a candle closed below the support ${neck:,.2f}."))
+                                  f"Two tops at about {px(top)}, then a candle closed below the support {px(neck)}."))
     if len(lo) >= 2:
         a, b = lo[-2], lo[-1]
         mids = [k for k in hi if a < k < b]
@@ -97,7 +126,7 @@ def check_last(bars):
             bottom = min(hist[a]["low"], hist[b]["low"])
             if last["close"] > neck >= bars[-2]["close"] and min(x["low"] for x in bars[b + 1:]) > bottom:
                 out.append(_entry("BUY", last["close"], bottom, at, "Double bottom",
-                                  f"Two bottoms at about ${bottom:,.2f}, then a candle closed above the resistance ${neck:,.2f}."))
+                                  f"Two bottoms at about {px(bottom)}, then a candle closed above the resistance {px(neck)}."))
 
     # Setups 1 and 2: pullback into an order block
     for side in ("BUY", "SELL"):
@@ -113,12 +142,12 @@ def check_last(bars):
             touched_before = any(x["low"] <= z_hi for x in later[2:])
             if not touched_before and last["low"] <= z_hi and last["close"] > z_hi and last["close"] > last["open"]:
                 out.append(_entry("BUY", last["close"], z_lo, at, kind,
-                                  f"Price came back to the order block ${z_lo:,.2f}-${z_hi:,.2f} and bounced."))
+                                  f"Price came back to the order block {px(z_lo)}-{px(z_hi)} and bounced."))
         else:
             touched_before = any(x["high"] >= z_lo for x in later[2:])
             if not touched_before and last["high"] >= z_lo and last["close"] < z_lo and last["close"] < last["open"]:
                 out.append(_entry("SELL", last["close"], z_hi, at, kind,
-                                  f"Price came back to the order block ${z_lo:,.2f}-${z_hi:,.2f} and got rejected."))
+                                  f"Price came back to the order block {px(z_lo)}-{px(z_hi)} and got rejected."))
     return out
 
 
@@ -176,9 +205,9 @@ def format_pattern(e):
     icon = "🟢" if e["side"] == "BUY" else "🔴"
     stop_pips = abs(e["entry"] - e["stop"]) / PIP
     return (f"{STRATEGY} · {raja.session_name(e['at'])}\n"
-            f"{icon} XAU/USD {e['side']} ENTRY ({e['at']:%-I:%M %p} NY), {e['setup']}\n"
+            f"{icon} {LABEL} {e['side']} ENTRY ({e['at']:%-I:%M %p} NY), {e['setup']}\n"
             f"{e['detail']}\n"
-            f"Entry: ${e['entry']:,.2f}\n"
-            f"Stop loss: ${e['stop']:,.2f} ({stop_pips:.0f} pips)\n"
-            f"Take profit 1: ${e['tp1']:,.2f} ({raja.TP1_PIPS} pips)\n"
-            f"Take profit 2: ${e['tp2']:,.2f} ({raja.TP2_PIPS} pips)")
+            f"Entry: {px(e['entry'])}\n"
+            f"Stop loss: {px(e['stop'])} ({stop_pips:.0f} pips)\n"
+            f"Take profit 1: {px(e['tp1'])} ({TP1_PIPS:.0f} pips)\n"
+            f"Take profit 2: {px(e['tp2'])} ({TP2_PIPS:.0f} pips)")

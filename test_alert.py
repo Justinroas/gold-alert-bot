@@ -252,7 +252,8 @@ def test_patterns_double_top_sell():
     bars = _bars15(flat + up + top1 + mid + top2 + brk)
     es = [e for e in patterns.check_last(bars) if e["setup"] == "Double top"]
     assert es and es[0]["side"] == "SELL" and es[0]["entry"] == 4000
-    assert "Sensei" in patterns.format_pattern(es[0])
+    msg = patterns.format_pattern(es[0])
+    assert "Sensei" in msg and "EUR/USD" in msg
 
 
 def test_watches_pullback_and_breakdown():
