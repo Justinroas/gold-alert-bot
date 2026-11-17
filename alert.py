@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 import gold_news
+import patterns
 import raja
 
 NY = ZoneInfo("America/New_York")
@@ -233,9 +234,11 @@ def main():
             messages.append(format_entry(state["pending"], price, now))
         if result:
             state.pop("pending")
+    bars15 = None
     try:
         sent = state.get("raja_sent", [])
-        for e in raja.find_entries(get_bars_15min(), now):
+        bars15 = get_bars_15min()
+        for e in raja.find_entries(bars15, now):
             k = raja.entry_key(e)
             if k not in sent and now - e["at"] <= RAJA_FRESH:
                 sent.append(k)
@@ -243,6 +246,17 @@ def main():
         state["raja_sent"] = sent[-50:]
     except Exception as exc:  # one strategy failing must not block the other
         print(f"Raja check failed: {exc}")
+    try:
+        if patterns.ENABLED:
+            sent = state.get("pattern_sent", [])
+            for e in patterns.find_entries(bars15 if bars15 is not None else get_bars_15min(), now):
+                k = patterns.entry_key(e)
+                if e["setup"] in patterns.LIVE_SETUPS and k not in sent and now - e["at"] <= RAJA_FRESH:
+                    sent.append(k)
+                    messages.append(patterns.format_pattern(e))
+            state["pattern_sent"] = sent[-50:]
+    except Exception as exc:
+        print(f"Pattern check failed: {exc}")
     news = []
     try:
         news = gold_news.news_messages(now, state)

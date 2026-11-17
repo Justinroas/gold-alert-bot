@@ -21,6 +21,9 @@ import raja
 NY = ZoneInfo("America/New_York")
 STRATEGY = "📙 Strategy: Chart patterns (video)"
 ENABLED = os.environ.get("PATTERNS", "on") == "on"
+# Setups that send alerts. The 53-day replay: double top +65 pips, liquidity sweep +65,
+# double bottom -140, trend + order block too few to tell. Others still run in the replay.
+LIVE_SETUPS = set(os.environ.get("PATTERN_SETUPS", "Double top,Liquidity sweep + order block").split(","))
 BAR = timedelta(minutes=15)
 PIP = 0.10
 SWING = 2                 # a swing high is higher than the 2 candles on each side
@@ -28,7 +31,7 @@ LOOKBACK = 64             # candles of history to look at (16 hours)
 OB_MAX_AGE = 16           # an order block is only good for 4 hours
 DOUBLE_TOL = 0.35         # two tops count as "equal" within 35% of an average candle
 DOUBLE_MIN_GAP = 4        # at least 1 hour between the two tops
-START = time(int(os.environ.get("PATTERNS_START_HOUR", "3")), 0)
+START = time(int(os.environ.get("PATTERNS_START_HOUR", "8")), 0)   # New York session tested better than London
 END = time(int(os.environ.get("PATTERNS_END_HOUR", "16")), 0)
 
 
