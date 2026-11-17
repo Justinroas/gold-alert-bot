@@ -8,6 +8,7 @@ import os
 from datetime import timedelta
 
 import alert
+import patterns
 import raja
 
 
@@ -59,6 +60,7 @@ def main():
         out.append(f"| {a['at']:%a %b %d %-I:%M %p} | {a['side']} | ${a['entry']:,.2f} | "
                    f"{'yes' if a['entered'] else 'no'} | +${a['best']:,.2f} | -${a['worst']:,.2f} |")
     out += raja_replay()
+    out += patterns_replay()
     text = "\n".join(out)
     print(text)
     path = os.environ.get("GITHUB_STEP_SUMMARY")
@@ -100,6 +102,38 @@ def raja_replay():
         g = [e for e in found if e["setup"].startswith(name)]
         c = lambda r: sum(e["result"] == r for e in g)
         out.append(f"| {name} | {len(g)} | {c('TP2')} | {c('TP1 then stop')} | {c('SL')} | {c('unclear')} |")
+    return out
+
+
+def patterns_replay():
+    key = os.environ.get("TWELVEDATA_API_KEY")
+    if not key:
+        return []
+    bars = alert._spot_bars(key, "15min", 5000)
+    found = []
+    for n in range(30, len(bars) + 1):
+        for e in patterns.check_last(bars[max(0, n - patterns.LOOKBACK):n]):
+            e["result"] = raja.outcome(e, bars[n:n + 32])
+            found.append(e)
+    days = len({raja.trading_day(b["start"]) for b in bars})
+    out = ["", f"## Replay: chart patterns from the video (15-min, 3am-4pm NY, {days} trading days)", "",
+           "| Setup | Entries | TP2 | TP1 then stop | SL | Unclear | Open | Net pips |", "|---|---|---|---|---|---|---|---|"]
+    def net(g):
+        tot = 0
+        for e in g:
+            stop = abs(e["entry"] - e["stop"]) / raja.PIP
+            tot += {"TP2": raja.TP2_PIPS, "TP1 then stop": raja.TP1_PIPS / 2 - stop / 2, "SL": -stop}.get(e["result"], 0)
+        return tot
+    groups = sorted({e["setup"] for e in found})
+    for name in groups + ["ALL"]:
+        g = found if name == "ALL" else [e for e in found if e["setup"] == name]
+        c = lambda r: sum(e["result"] == r for e in g)
+        out.append(f"| {name} | {len(g)} | {c('TP2')} | {c('TP1 then stop')} | {c('SL')} | {c('unclear')} | "
+                   f"{c('open') + c('TP1')} | {net(g):+.0f} |")
+    for sess in ("London", "New York"):
+        g = [e for e in found if sess in raja.session_name(e["at"])]
+        out.append(f"| ({sess} session) | {len(g)} | {sum(e['result'] == 'TP2' for e in g)} | | "
+                   f"{sum(e['result'] == 'SL' for e in g)} | | | {net(g):+.0f} |")
     return out
 
 

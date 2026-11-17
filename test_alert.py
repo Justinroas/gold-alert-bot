@@ -229,3 +229,27 @@ def test_gold_news_forex_factory():
     assert len(warn) == 1 and "Core Retail Sales" in warn[0] and "Expected: forecast 0.3%" in warn[0]
     # the medium event gets no warning
     assert gn.news_messages(_ny(2026, 11, 17, 9, 42).astimezone(_Z("UTC")), st, fetch=lambda: [], fetch_cal=lambda: ff) == []
+
+
+# ---- chart patterns (video) ----
+import patterns
+
+
+def _bars15(seq, start=_dt(2026, 11, 10, 3, 0, tzinfo=_NY)):
+    out = []
+    for i, (o, h, l, c) in enumerate(seq):
+        out.append(dict(start=start + _td(minutes=15 * i), open=o, high=h, low=l, close=c, volume=0))
+    return out
+
+
+def test_patterns_double_top_sell():
+    flat = [(4000, 4002, 3998, 4001)] * 20
+    up = [(4001 + 2 * k, 4004 + 2 * k, 4000 + 2 * k, 4003 + 2 * k) for k in range(5)]        # to ~4012
+    top1 = [(4011, 4020, 4010, 4012), (4012, 4013, 4006, 4007), (4007, 4008, 4004, 4005)]
+    mid = [(4005, 4007, 4003, 4006), (4006, 4010, 4005, 4009), (4009, 4014, 4008, 4013)]
+    top2 = [(4013, 4020.2, 4012, 4014), (4014, 4015, 4009, 4010), (4010, 4011, 4006, 4007)]
+    brk = [(4006, 4006.5, 3999, 4000)]                                                        # closes below 4003
+    bars = _bars15(flat + up + top1 + mid + top2 + brk)
+    es = [e for e in patterns.check_last(bars) if e["setup"] == "Double top"]
+    assert es and es[0]["side"] == "SELL" and es[0]["entry"] == 4000
+    assert "Chart patterns" in patterns.format_pattern(es[0])
