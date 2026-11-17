@@ -367,6 +367,7 @@ def build_orb_alert(sig, pick, today):
 LOTTO_PRICE = (0.10, 0.25)  # what you pay per share: $10-$25 for 1 contract
 LOTTO_TAKE = 2.0            # sell when it's worth this many times what you paid
 LOTTO_CUTOFF = "3pm"
+LOTTO_CONTRACTS = int(os.environ.get("LOTTO_CONTRACTS", "10"))  # Reddit-style: several cheap contracts
 
 
 def lotto_pick(mkt, side, spot, today, lo=LOTTO_PRICE[0], hi=LOTTO_PRICE[1]):
@@ -395,8 +396,9 @@ def build_lotto_alert(sig, pick):
         f"🎰 LOTTERY TICKET · SPY {'CALL' if up else 'PUT'}, expires TODAY",
         f"Why: SPY broke {'above' if up else 'below'} its morning range and the fear meter agrees."
         f" A same-day option is cheap and can multiply if SPY keeps running, but most of these end at $0.",
-        f"Buy: SPY {short_money(pick['strike'])} {sig['side']}, expires today, about ${pick['premium']:.2f}"
-        f" ({short_money(cost)} per contract)",
+        f"Buy: {LOTTO_CONTRACTS} SPY {short_money(pick['strike'])} {sig['side']}s, expires today, about"
+        f" ${pick['premium']:.2f} each ({short_money(cost)} per contract, {short_money(cost * LOTTO_CONTRACTS)} total)."
+        f" If they double: about {short_money(cost * LOTTO_CONTRACTS * LOTTO_TAKE)}.",
         f"Close position: sell when it's worth about ${pick['premium'] * LOTTO_TAKE:.2f} ({LOTTO_TAKE:.0f}x),"
         f" or if SPY {'drops under' if up else 'climbs over'} {short_money(sig['stop'])}, or by {LOTTO_CUTOFF}"
         " no matter what.",
@@ -1194,7 +1196,7 @@ This chat sends stock options trade ideas on SPY and big stocks (NVDA, TSLA, AAP
 ⏰ WHAT YOU'LL GET (weekdays)
 ☀️ 8:45am · Morning brief: big events coming (earnings, Fed, inflation, jobs) and whether options are 🟢 cheap or 🔴 pricey today.
 🎯 ~9:50am · Daily setup: the day's one best trade for a small account (1 contract, $200-$350). Exit at +30% / -30%, out by 11am.
-📈 9:50-11:30am · SPY breakout: SPY breaks out of its first-15-minute range and the fear meter agrees. Comes with a 🎰 same-day lottery ticket: a cheap SPY option, sell at 2x or by 3pm.
+📈 9:50-11:30am · SPY breakout: SPY breaks out of its first-15-minute range and the fear meter agrees. Comes with a 🎰 same-day lottery ticket: 10 cheap SPY contracts, sell at 2x or by 3pm.
 ⚡ All day · Big move: a stock jumps or drops 3%+ and is holding it.
 📰 12pm + 3:30pm · Market news: the top headlines and why they matter to us.
 🩸 ~3:20pm · Panic dip: a strong stock got dumped while the market is scared. Usually bounces within days.
