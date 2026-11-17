@@ -2,6 +2,10 @@ name: Send example alerts
 
 on:
   workflow_dispatch:
+    inputs:
+      sample:
+        description: "breakout or sensei"
+        default: "breakout"
 
 jobs:
   send:
@@ -11,8 +15,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install requests
+      - run: pip install -r requirements.txt
       - run: python sample_alert.py
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TWELVEDATA_API_KEY: ${{ secrets.TWELVEDATA_API_KEY }}
+          SAMPLE: ${{ inputs.sample }}
