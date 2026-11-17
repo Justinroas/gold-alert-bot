@@ -109,20 +109,20 @@ def patterns_replay():
     key = os.environ.get("TWELVEDATA_API_KEY")
     if not key:
         return []
-    bars = alert._spot_bars(key, "15min", 5000)
+    bars = alert._spot_bars(key, "15min", 5000, patterns.SYMBOL)
     found = []
     for n in range(30, len(bars) + 1):
         for e in patterns.check_last(bars[max(0, n - patterns.LOOKBACK):n]):
             e["result"] = raja.outcome(e, bars[n:n + 32])
             found.append(e)
     days = len({raja.trading_day(b["start"]) for b in bars})
-    out = ["", f"## Replay: Sensei (chart patterns from the video) (15-min, 3am-4pm NY, {days} trading days)", "",
+    out = ["", f"## Replay: Sensei on {patterns.SYMBOL} (15-min, {days} trading days)", "",
            "| Setup | Entries | TP2 | TP1 then stop | SL | Unclear | Open | Net pips |", "|---|---|---|---|---|---|---|---|"]
     def net(g):
         tot = 0
         for e in g:
-            stop = abs(e["entry"] - e["stop"]) / raja.PIP
-            tot += {"TP2": raja.TP2_PIPS, "TP1 then stop": raja.TP1_PIPS / 2 - stop / 2, "SL": -stop}.get(e["result"], 0)
+            stop = abs(e["entry"] - e["stop"]) / patterns.PIP
+            tot += {"TP2": patterns.TP2_PIPS, "TP1 then stop": patterns.TP1_PIPS / 2 - stop / 2, "SL": -stop}.get(e["result"], 0)
         return tot
     groups = sorted({e["setup"] for e in found})
     for name in groups + ["ALL"]:

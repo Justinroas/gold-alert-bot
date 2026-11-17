@@ -27,22 +27,29 @@ SYMBOL = os.environ.get("PATTERN_SYMBOL", "EUR/USD")
 EURO = SYMBOL == "EUR/USD"
 LABEL = "💶 EUR/USD (euro, not gold)" if EURO else "XAU/USD"
 PIP = 0.0001 if EURO else 0.10
-TP1_PIPS = float(os.environ.get("PATTERN_TP1_PIPS", "15" if EURO else "35"))
-TP2_PIPS = float(os.environ.get("PATTERN_TP2_PIPS", "30" if EURO else "55"))
-MAX_STOP_PIPS = float(os.environ.get("PATTERN_MAX_STOP_PIPS", "20" if EURO else "50"))
+# EUR/USD replay (Sep 26 - Nov 17, 2026): TP 10/20 with a 15-pip max stop did best (+53 pips
+# overall); bigger targets mostly ran out of time.
+TP1_PIPS = float(os.environ.get("PATTERN_TP1_PIPS", "10" if EURO else "35"))
+TP2_PIPS = float(os.environ.get("PATTERN_TP2_PIPS", "20" if EURO else "55"))
+MAX_STOP_PIPS = float(os.environ.get("PATTERN_MAX_STOP_PIPS", "15" if EURO else "50"))
 STOP_BUFFER_PIPS = 2 if EURO else 5
 ENABLED = os.environ.get("PATTERNS", "on") == "on"
-# Setups that send alerts. The 53-day replay: double top +65 pips, liquidity sweep +65,
-# double bottom -140, trend + order block too few to tell. Others still run in the replay.
-LIVE_SETUPS = set(os.environ.get("PATTERN_SETUPS", "Double top,Liquidity sweep + order block").split(","))
+# Setups that send alerts. EUR/USD replay (TP 10/20): double bottom +72 pips (16 trades),
+# double top +75 in Asia but -79 in New York, liquidity sweep -47, trend setups too few to tell.
+# (Gold's own replay had double top and the sweep winning instead.)
+LIVE_SETUPS = set(os.environ.get("PATTERN_SETUPS", "Double top,Double bottom" if EURO
+                                 else "Double top,Liquidity sweep + order block").split(","))
+SKIP = {("Double top", "New York")} if EURO else set()   # (setup, session) pairs that lost
 BAR = timedelta(minutes=15)
 SWING = 2                 # a swing high is higher than the 2 candles on each side
 LOOKBACK = 64             # candles of history to look at (16 hours)
 OB_MAX_AGE = 16           # an order block is only good for 4 hours
 DOUBLE_TOL = 0.35         # two tops count as "equal" within 35% of an average candle
 DOUBLE_MIN_GAP = 4        # at least 1 hour between the two tops
-START = time(int(os.environ.get("PATTERNS_START_HOUR", "8")), 0)   # New York session tested better than London
-END = time(int(os.environ.get("PATTERNS_END_HOUR", "16")), 0)
+# Gold: New York session tested best. Euro: watch around the clock on weekdays.
+START = time(int(os.environ.get("PATTERNS_START_HOUR", "0" if EURO else "8")), 0)
+_end = int(os.environ.get("PATTERNS_END_HOUR", "24" if EURO else "16"))
+END = time(23, 59) if _end >= 24 else time(_end, 0)
 
 
 def swings(bars):
@@ -195,6 +202,12 @@ def find_entries(bars, now):
     for n in range(max(30, len(done) - 3), len(done) + 1):
         out += check_last(done[max(0, n - LOOKBACK):n])
     return out
+
+
+def live(e):
+    """Does this entry send an alert?"""
+    return e["setup"] in LIVE_SETUPS and not any(
+        e["setup"] == s and n in raja.session_name(e["at"]) for s, n in SKIP)
 
 
 def entry_key(e):

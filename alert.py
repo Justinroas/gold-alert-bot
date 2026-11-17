@@ -258,7 +258,7 @@ def main():
                 pbars = []
             for e in patterns.find_entries(pbars, now):
                 k = patterns.entry_key(e)
-                if e["setup"] in patterns.LIVE_SETUPS and k not in sent and now - e["at"] <= RAJA_FRESH:
+                if patterns.live(e) and k not in sent and now - e["at"] <= RAJA_FRESH:
                     sent.append(k)
                     messages.append(patterns.format_pattern(e))
             state["pattern_sent"] = sent[-50:]
