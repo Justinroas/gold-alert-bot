@@ -363,6 +363,46 @@ def build_orb_alert(sig, pick, today):
     return signal_text(sig["side"], "SPY", why, pick, sell)
 
 
+# ---------- SPY same-day lottery ticket (0DTE), rides on the SPY breakout ----------
+LOTTO_PRICE = (0.10, 0.25)  # what you pay per share: $10-$25 for 1 contract
+LOTTO_TAKE = 2.0            # sell when it's worth this many times what you paid
+LOTTO_CUTOFF = "3pm"
+
+
+def lotto_pick(mkt, side, spot, today, lo=LOTTO_PRICE[0], hi=LOTTO_PRICE[1]):
+    """Same-day SPY option you can buy for $0.10-$0.25 (the ask), closest to the money."""
+    exps = [e for e in mkt.expiries("SPY") if e == today.isoformat()]
+    if not exps:
+        return None
+    calls, puts = mkt.chain("SPY", exps[0])
+    rows = []
+    for r in (calls if side == "call" else puts):
+        ask, bid, k = r.get("ask") or 0, r.get("bid") or 0, r.get("strike")
+        cost = ask if ask > 0 else (r.get("lastPrice") or 0)
+        out_of_money = k and (k > spot if side == "call" else k < spot)
+        if out_of_money and lo <= cost <= hi and bid > 0:
+            rows.append((abs(k - spot), k, cost))
+    if not rows:
+        return None
+    _, k, cost = min(rows)
+    return dict(strike=k, premium=cost, expiry=exps[0])
+
+
+def build_lotto_alert(sig, pick):
+    up = sig["side"] == "call"
+    cost = pick["premium"] * 100
+    return "\n".join([
+        f"🎰 LOTTERY TICKET · SPY {'CALL' if up else 'PUT'}, expires TODAY",
+        f"Why: SPY broke {'above' if up else 'below'} its morning range and the fear meter agrees."
+        f" A same-day option is cheap and can multiply if SPY keeps running, but most of these end at $0.",
+        f"Buy: 1 SPY {short_money(pick['strike'])} {sig['side']}, expires today, about ${pick['premium']:.2f}"
+        f" ({short_money(cost)} total)",
+        f"Close position: sell when it's worth about ${pick['premium'] * LOTTO_TAKE:.2f} ({LOTTO_TAKE:.0f}x),"
+        f" or if SPY {'drops under' if up else 'climbs over'} {short_money(sig['stop'])}, or by {LOTTO_CUTOFF}"
+        " no matter what.",
+        "Risk: 🔴 Lottery ticket (only money you're fine losing)"])
+
+
 # ---------- Daily setup: one trade a day for a small ($400) account ----------
 # Watch 9:30-9:45, then trade the direction of the opening move on the most liquid names.
 # The user asked for this (2026-11-16). It is NOT backtested like the SPY breakout or the panic dip.
@@ -1154,7 +1194,7 @@ This chat sends stock options trade ideas on SPY and big stocks (NVDA, TSLA, AAP
 ⏰ WHAT YOU'LL GET (weekdays)
 ☀️ 8:45am · Morning brief: big events coming (earnings, Fed, inflation, jobs) and whether options are 🟢 cheap or 🔴 pricey today.
 🎯 ~9:50am · Daily setup: the day's one best trade for a small account (1 contract, $200-$350). Exit at +30% / -30%, out by 11am.
-📈 9:50-11:30am · SPY breakout: SPY breaks out of its first-15-minute range and the fear meter agrees.
+📈 9:50-11:30am · SPY breakout: SPY breaks out of its first-15-minute range and the fear meter agrees. Comes with a 🎰 same-day lottery ticket ($10-$25): sell at 2x or by 3pm.
 ⚡ All day · Big move: a stock jumps or drops 3%+ and is holding it.
 📰 12pm + 3:30pm · Market news: the top headlines and why they matter to us.
 🩸 ~3:20pm · Panic dip: a strong stock got dumped while the market is scared. Usually bounces within days.
@@ -1365,6 +1405,14 @@ def main():
                 if sig["agree"]:
                     pick = budget_pick(mkt, "SPY", sig["side"], sig["price"], today)
                     chat_id = send(build_orb_alert(sig, pick, today), None if quiet else chat_id, state) or chat_id
+                    try:
+                        lp = lotto_pick(mkt, sig["side"], sig["price"], today)
+                        if lp:
+                            chat_id = send(build_lotto_alert(sig, lp), None if quiet else chat_id, state) or chat_id
+                        else:
+                            print("No same-day SPY option at $0.10-$0.25")
+                    except Exception as e:
+                        print(f"Lottery pick failed: {e}")
                 else:
                     print("SPY broke out but VIX disagrees: skip the day")
             elif now.time() > ORB_LAST_SIGNAL:

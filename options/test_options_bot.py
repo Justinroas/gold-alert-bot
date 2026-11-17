@@ -262,3 +262,17 @@ def test_dip_fits_budget():
             return [dict(strike=k, bid=p - 0.05, ask=p + 0.05, lastPrice=p) for k, p in ((505, 18.6), (530, 0.9))], []
     ok = ob.dip_pick(C(), "MSFT", 500.0, today)
     assert ok["strike"] == 530 and "Buy: MSFT $530 call" in ob.build_dip_alert("MSFT", 500.0, dict(rsi=4), 26, ok)
+
+
+def test_lotto():
+    class M:
+        def expiries(self, s): return ["2026-11-18", "2026-11-19"]
+        def chain(self, s, e):
+            rows = [dict(strike=k, bid=a - 0.02, ask=a, lastPrice=a) for k, a in ((600, 1.2), (602, 0.40), (603, 0.22), (604, 0.12), (605, 0.06))]
+            return rows, []
+    pick = ob.lotto_pick(M(), "call", 601.0, date(2026, 11, 18))
+    assert pick == dict(strike=603, premium=0.22, expiry="2026-11-18")
+    assert ob.lotto_pick(M(), "call", 601.0, date(2026, 11, 17)) is None  # no same-day expiry
+    text = ob.build_lotto_alert(dict(side="call", stop=600.0), pick)
+    assert text.startswith("🎰 LOTTERY TICKET · SPY CALL, expires TODAY") and "1 SPY $603 call" in text
+    assert "($22 total)" in text and "about $0.44 (2x)" in text and "by 3pm" in text
