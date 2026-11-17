@@ -253,3 +253,17 @@ def test_patterns_double_top_sell():
     es = [e for e in patterns.check_last(bars) if e["setup"] == "Double top"]
     assert es and es[0]["side"] == "SELL" and es[0]["entry"] == 4000
     assert "Sensei" in patterns.format_pattern(es[0])
+
+
+def test_watches_pullback_and_breakdown():
+    import watches
+    t = _dt(2026, 11, 17, 13, 45, tzinfo=_NY)
+    bars = _bars15([(3855, 3858, 3853, 3857), (3857, 3864, 3856, 3862.5), (3862, 3863, 3850, 3851)], start=t)
+    now = t + _td(minutes=46)
+    got = watches.check(bars, now, [])
+    assert [g[0]["id"] for g in got] == ["2026-11-17-pullback-sell"] and got[0][1] == 3851
+    msg = watches.format_watch(*got[0])
+    assert "SELL NOW" in msg and "Stop loss: $3,872.00" in msg
+    bars2 = _bars15([(3845, 3846, 3836, 3837)], start=t)
+    assert [g[0]["id"] for g in watches.check(bars2, t + _td(minutes=16), [])] == ["2026-11-17-breakdown-sell"]
+    assert watches.check(bars2, t + _td(minutes=16), ["2026-11-17-breakdown-sell"]) == []

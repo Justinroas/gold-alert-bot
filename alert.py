@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 import gold_news
+import watches
 import patterns
 import raja
 
@@ -257,6 +258,14 @@ def main():
             state["pattern_sent"] = sent[-50:]
     except Exception as exc:
         print(f"Pattern check failed: {exc}")
+    try:
+        fired = state.get("watch_fired", [])
+        for w, price, at in watches.check(bars15 if bars15 is not None else get_bars_15min(), now, fired):
+            fired.append(w["id"])
+            messages.append(watches.format_watch(w, price, at))
+        state["watch_fired"] = fired[-50:]
+    except Exception as exc:
+        print(f"Watch check failed: {exc}")
     news = []
     try:
         news = gold_news.news_messages(now, state)
