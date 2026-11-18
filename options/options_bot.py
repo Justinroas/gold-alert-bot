@@ -1407,6 +1407,14 @@ def main():
         save_state(state)
         return
 
+    if FORCE == "quote" and os.environ.get("MESSAGE", "").strip():  # "SYM YYYY-MM-DD STRIKE": one contract + stock history (log only)
+        sym, exp, k = os.environ["MESSAGE"].split()
+        print("daily:", mkt.daily(sym)[-5:])
+        calls, puts = mkt.chain(sym, exp)
+        for r in calls:
+            if abs(r.get("strike", 0) - float(k)) < 0.01:
+                print("CALL", sym, exp, k, {x: r.get(x) for x in ("bid", "ask", "lastPrice", "impliedVolatility")})
+        return
     if FORCE == "quote":  # print SPY now + cheap puts/calls for today and the next expiries (log only)
         bars = mkt.intraday("SPY")
         d = mkt.daily("SPY")
