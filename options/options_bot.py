@@ -290,6 +290,16 @@ def budget_pick(mkt, sym, kind, price, today, budget=BUDGET):
     return best
 
 
+SEND_LOTTERY = os.environ.get("SEND_LOTTERY", "") == "1"  # user turned lottery tickets off (2026-11-18)
+
+
+def good_pick(pick):
+    """Only send trades with a real chance (🟢 clear or 🟡 risky), unless lottery tickets are switched on."""
+    if not pick or pick.get("too_pricey"):
+        return SEND_LOTTERY and bool(pick)
+    return SEND_LOTTERY or pick.get("prob", 0) >= RISKY_CHANCE
+
+
 def risk_tag(prob):
     """How risky a trade is, from its chance of paying off."""
     if prob >= CLEAR_CHANCE:
@@ -1190,6 +1200,9 @@ def build_move_alert(mkt, s, pct, level, today, earn=None, pick=None):
     if not kind:
         return None, None
     pick = pick or budget_pick(mkt, sym, kind, price, today)
+    if not good_pick(pick):
+        print(f"{sym}: setup, but no option under budget with a real chance (lottery only): skip")
+        return None, kind
     up = kind == "call"
     mid = (bar["high"] + bar["low"]) / 2
     h = mkt.headline(sym)
@@ -1208,7 +1221,7 @@ This chat sends stock options trade ideas on SPY and big stocks (NVDA, TSLA, AAP
 ⏰ WHAT YOU'LL GET (weekdays)
 ☀️ 8:45am · Morning brief: big events coming (earnings, Fed, inflation, jobs) and whether options are 🟢 cheap or 🔴 pricey today.
 🎯 ~9:50am · Daily setup: the day's one best trade for a small account (1 contract, $200-$350). Exit at +30% / -30%, out by 11am.
-📈 9:50-11:30am · SPY breakout: SPY breaks out of its first-15-minute range and the fear meter agrees. Comes with a 🎰 same-day lottery ticket: 10 cheap SPY contracts, sell at 2x or by 3pm.
+📈 9:50-11:30am · SPY breakout: SPY breaks out of its first-15-minute range and the fear meter agrees.
 ⚡ All day · Big move: a stock jumps or drops 3%+ and is holding it.
 📰 12pm + 3:30pm · Market news: the top headlines and why they matter to us.
 🩸 ~3:20pm · Panic dip: a strong stock got dumped while the market is scared. Usually bounces within days.
@@ -1219,7 +1232,7 @@ This chat sends stock options trade ideas on SPY and big stocks (NVDA, TSLA, AAP
 💰 CLOSE POSITION = sell your option: take the profit or get out
 Buy: which option to buy. Prices are per share, so 1 contract = price x 100 (a $0.85 option costs $85).
 Close position: when to get out. Always follow it.
-Risk: 🟢 Clear trade · 🟡 Risky · 🔴 Lottery ticket (small bet only)
+Risk: 🟢 Clear trade · 🟡 Risky (lottery tickets are not sent)
 
 🧠 WORDS YOU'LL SEE
 VIX = the market's fear meter. Under 15 calm, 20+ scared, 30+ panic.
@@ -1266,7 +1279,8 @@ def sample_alerts(today):
         pct = (price / prev - 1) * 100
         lvl = move_level(pct, MOVE_PCT_ETF if sym in ETFS else MOVE_PCT_STOCK) or 1
         text, _ = build_move_alert(_SampleMarket(bars, head), s, pct, lvl, today, pick=pick)
-        out.append("🧪 TEST (made-up prices)\n" + text)
+        if text:  # the lottery-ticket example is skipped unless lottery tickets are switched on
+            out.append("🧪 TEST (made-up prices)\n" + text)
     sig = dict(side="call", price=748.10, hi=747.60, lo=744.90, stop=746.25, target=750.80,
                vix=21.4, vix_prev=22.6, agree=True)
     pick = dict(strike=760, premium=0.95, expiry=(today + timedelta(days=8)).isoformat(), prob=0.17)
@@ -1435,10 +1449,13 @@ def main():
                 state["orb"] = day  # only the day's first breakout counts (that's what was tested)
                 if sig["agree"]:
                     pick = budget_pick(mkt, "SPY", sig["side"], sig["price"], today)
-                    chat_id = send(build_orb_alert(sig, pick, today), None if quiet else chat_id, state) or chat_id
+                    if good_pick(pick):
+                        chat_id = send(build_orb_alert(sig, pick, today), None if quiet else chat_id, state) or chat_id
+                    else:
+                        print("SPY breakout, but only a lottery-ticket option fits the budget: skip")
                     try:
-                        lp = lotto_pick(mkt, sig["side"], sig["price"], today)
-                        if lp:
+                        lp = SEND_LOTTERY and lotto_pick(mkt, sig["side"], sig["price"], today)
+                        if lp:  # 🎰 only when lottery tickets are switched on
                             chat_id = send(build_lotto_alert(sig, lp), None if quiet else chat_id, state) or chat_id
                         else:
                             print("No same-day SPY option at $0.10-$0.25")
@@ -1557,8 +1574,12 @@ def check_dips(mkt, watch, state, today, say):
             sig = dip_signal(closes, vix)
             print(f"{sym}: dip={bool(sig)}")
             if sig:
-                say(build_dip_alert(sym, price, sig, vix, dip_pick(mkt, sym, price, today)))
-                open_dips[sym] = dict(date=today.isoformat(), price=price)
+                pick = dip_pick(mkt, sym, price, today)
+                if good_pick(pick):
+                    say(build_dip_alert(sym, price, sig, vix, pick))
+                    open_dips[sym] = dict(date=today.isoformat(), price=price)
+                else:
+                    print(f"{sym}: panic dip, but no option under budget with a real chance: skip")
         except Exception as e:
             print(f"{sym}: dip check failed: {e}")
 

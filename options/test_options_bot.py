@@ -120,8 +120,9 @@ def test_risk_tags():
 
 def test_sample_alerts_cover_each_risk_level():
     texts = ob.sample_alerts(date(2026, 11, 12))
-    assert len(texts) == 6 and "· SPY" in texts[3] and "RSI-2" in texts[4] and "CLOSE POSITION" in texts[5]
-    assert "Clear trade" in texts[0] and "Risky" in texts[1] and "Lottery ticket" in texts[2]
+    assert len(texts) == 5 and "· SPY" in texts[2] and "RSI-2" in texts[3] and "CLOSE POSITION" in texts[4]
+    assert "Clear trade" in texts[0] and "Risky" in texts[1] and not any("Lottery ticket" in t for t in texts)
+    assert not ob.good_pick(dict(prob=0.08)) and ob.good_pick(dict(prob=0.2)) and not ob.good_pick(dict(too_pricey=True))
     assert all(t.startswith("🧪 TEST") for t in texts)
 
 
