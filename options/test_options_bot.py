@@ -295,3 +295,29 @@ def test_close_alerts_name_the_contract():
     dd = dict(sym="SPY", side="put", contract=dict(strike=730, expiry="2026-11-20", premium=2.5))
     t2 = ob.build_daily_close(dd, 2.0)
     assert "SPY $730 put (exp Nov 20), from today's SPY daily setup" in t2 and "-$50 per contract" in t2
+
+
+class SpreadMkt:
+    def expiries(self, sym):
+        return ["2026-11-20", "2026-12-04", "2026-12-11", "2027-01-15"]
+
+    def chain(self, sym, exp):
+        years = (date.fromisoformat(exp) - date(2026, 11, 18)).days / 365
+        rows = []
+        for k in range(720, 745):
+            p = round(ob.bs_price("call", 730.4, k, years, 0.2), 2)
+            rows.append(dict(strike=float(k), bid=p - 0.02, ask=p + 0.02, lastPrice=p))
+        return rows, []
+
+
+def test_small_budget_spread():
+    sp = ob.spread_pick(SpreadMkt(), "SPY", 730.4, date(2026, 11, 18))
+    assert sp["expiry"] == "2026-12-11" and sp["strike"] == 730 and sp["strike2"] > 730
+    assert sp["premium"] * 100 <= 100
+    t = ob.build_spread_alert("SPY", dict(rsi=7), 24, sp)
+    assert t.startswith("💵 SMALL BUDGET · SPY call spread") and "77%" in t and "Worst case" in t
+    assert "Lottery" not in t
+    c = dict(strike=730.0, strike2=sp["strike2"], expiry="2026-12-11", premium=sp["premium"])
+    assert "SPY $730/$" in ob.contract_name("SPY", "call", c) and "call spread (exp Dec 11)" in ob.contract_name("SPY", "call", c)
+    v = ob.spread_value(SpreadMkt(), "SPY", c)
+    assert v is not None and 0 < v < sp["premium"]
