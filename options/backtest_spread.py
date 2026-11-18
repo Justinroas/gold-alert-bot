@@ -18,7 +18,7 @@ import yfinance as yf
 INDEX = {"SPY", "QQQ", "IWM", "DIA"}
 BUDGET = float(os.environ.get("BUDGET", "100"))
 DAYS_OUT = 21
-SLIP = 0.05
+SLIP = 0.03  # per leg each way for stocks; 0.01 for index ETFs
 YEARS = os.environ.get("YEARS", "10y")
 
 
@@ -68,7 +68,7 @@ def vol(sym, closes, i, vix):
 def replay(sym, bars, vix):
     closes = [c for _, c in bars]
     rsi = rsi2(closes)
-    out = dict(spread=[], call=[])
+    out = dict(spread=[], itm=[], call=[])
     i = 210
     while i < len(bars) - 1:
         d, s = bars[i]
@@ -84,18 +84,19 @@ def replay(sym, bars, vix):
         t0, t1 = DAYS_OUT / 365, max(DAYS_OUT - (bars[j][0] - d).days, 0) / 365
         st = strike_step(sym, s)
         k1 = round(s / st) * st
-        # spread: widest that fits the budget
-        best = None
-        for w_steps in range(1, 30):
-            k2 = k1 + w_steps * st
-            cost = bs_call(s, k1, t0, iv) - bs_call(s, k2, t0, iv) + 2 * SLIP
-            if cost * 100 > BUDGET:
-                break
-            best = (k2, cost)
-        if best:
-            k2, cost = best
-            val = max(bs_call(closes[j], k1, t1, ivx) - bs_call(closes[j], k2, t1, ivx) - 2 * SLIP, 0)
-            out["spread"].append(dict(day=d, cost=cost * 100, pnl=(val - cost) * 100, width=k2 - k1))
+        slip = 0.01 if sym in INDEX else SLIP
+        for name, itm in (("spread", False), ("itm", True)):
+            best = None
+            for w_steps in range(1, 30):
+                lo, hi = (k1 - w_steps * st, k1) if itm else (k1, k1 + w_steps * st)
+                cost = bs_call(s, lo, t0, iv) - bs_call(s, hi, t0, iv) + 2 * slip
+                if cost * 100 > BUDGET:
+                    break
+                best = (lo, hi, cost)
+            if best:
+                lo, hi, cost = best
+                val = max(bs_call(closes[j], lo, t1, ivx) - bs_call(closes[j], hi, t1, ivx) - 2 * slip, 0)
+                out[name].append(dict(day=d, cost=cost * 100, pnl=(val - cost) * 100, width=hi - lo))
         c = bs_call(s, k1, t0, iv) + SLIP
         if c * 100 <= BUDGET:
             val = max(bs_call(closes[j], k1, t1, ivx) - SLIP, 0)
@@ -129,6 +130,7 @@ def main():
             lines.append(f"{t}: failed {e}")
             continue
         lines.append(f"**{t}** SPREAD: {summ(r['spread'])}")
+        lines.append(f"**{t}** ITM SPREAD: {summ(r['itm'])}")
         lines.append(f"**{t}** CALL: {summ(r['call'])}")
         lines.append("")
     text = "\n".join(lines)
