@@ -1529,7 +1529,16 @@ def main():
         return
 
     if FORCE == "quote" and os.environ.get("MESSAGE", "").strip():  # "SYM YYYY-MM-DD STRIKE": one contract + stock history (log only)
-        sym, exp, k = os.environ["MESSAGE"].split()
+        parts = os.environ["MESSAGE"].split()
+        if parts[0] == "spread":  # "spread SPY": what the small-budget alert would pick right now
+            for sym in parts[1:]:
+                px = mkt.daily(sym)[-1][1]
+                sp = spread_pick(mkt, sym, px, now.date())
+                print(sym, px, sp)
+                if sp:
+                    print(build_spread_alert(sym, dict(rsi=5), 25, sp))
+            return
+        sym, exp, k = parts
         print("daily:", mkt.daily(sym)[-5:])
         calls, puts = mkt.chain(sym, exp)
         for r in calls:
