@@ -495,8 +495,47 @@ def build_daily_alert(sym, sig, pick):
     return "\n".join(lines)
 
 
-def build_daily_close(d):
-    return "\n".join([f"⏰ CLOSE POSITION · {d['sym']} {d['side']} (daily setup)",
+def contract_name(sym, side, c):
+    """'AMZN $260 call (exp Dec 4)' when we know the contract, else 'AMZN call'."""
+    if c and c.get("strike") and c.get("expiry"):
+        exp = datetime.strptime(c["expiry"], "%Y-%m-%d").date()
+        return f"{sym} {short_money(c['strike'])} {side} (exp {exp.strftime('%b')} {exp.day})"
+    return f"{sym} {side}"
+
+
+def nice_day(iso):
+    d = datetime.strptime(iso, "%Y-%m-%d").date()
+    return f"{d.strftime('%b')} {d.day}"
+
+
+def price_line(c, now_price):
+    """'Bought about $7.90, now about $12.55 (+$465 per contract)'."""
+    if not (c and c.get("premium")):
+        return None
+    line = f"Bought about ${c['premium']:.2f}"
+    if now_price:
+        line += f", now about ${now_price:.2f} ({'+' if now_price >= c['premium'] else '-'}" \
+                f"{short_money(abs(now_price - c['premium']) * 100)} per contract)"
+    return line + "."
+
+
+def option_bid(mkt, sym, side, c):
+    try:
+        calls, puts = mkt.chain(sym, c["expiry"])
+        for r in (calls if side == "call" else puts):
+            if abs(r.get("strike", 0) - c["strike"]) < 0.01:
+                return (r.get("bid") or 0) or premium_of(r)
+    except Exception as e:
+        print(f"{sym}: option price check failed: {e}")
+    return None
+
+
+def build_daily_close(d, now_price=None):
+    lines = [f"⏰ CLOSE POSITION · {contract_name(d['sym'], d['side'], d.get('contract'))}, from today's {d['sym']} daily setup"]
+    pl = price_line(d.get("contract"), now_price)
+    if pl:
+        lines.append(pl)
+    return "\n".join(lines + [
                       "It's 11am. If you're still in today's setup, sell it now, win or lose. No overnight holds."])
 
 
@@ -531,7 +570,8 @@ def check_daily(mkt, watch, state, now, say, force=False):
                 print(f"{sym}: daily pick failed: {e}")
             if pick:
                 say(build_daily_alert(sym, sig, pick))
-                d.update(done=True, sym=sym, side=sig["side"])
+                d.update(done=True, sym=sym, side=sig["side"],
+                         contract=dict(strike=pick["strike"], expiry=pick["expiry"], premium=pick["premium"]))
             else:
                 print(f"{sym}: no option at $2.00-$3.50")
         if not d.get("done") and (force or t >= DAILY_GIVE_UP):
@@ -539,7 +579,8 @@ def check_daily(mkt, watch, state, now, say, force=False):
                 " Sitting out is a trade too.")
             d["done"] = True
     if d.get("sym") and not d.get("closed") and DAILY_CLOSE[0] <= t <= DAILY_CLOSE[1]:
-        say(build_daily_close(d))
+        c = d.get("contract")
+        say(build_daily_close(d, option_bid(mkt, d["sym"], d["side"], c) if c else None))
         d["closed"] = True
     state["daily"] = d
 
@@ -616,11 +657,19 @@ def build_dip_alert(sym, price, sig, vix, pick, budget=BUDGET):
     return signal_text("call", sym, why, pick, sell)
 
 
-def build_dip_exit(sym, price, entry_price, reason):
+def build_dip_exit(sym, price, entry_price, reason, d=None, now_price=None):
+    d = d or {}
     chg = (price / entry_price - 1) * 100
+    c = d.get("contract")
+    head = contract_name(sym, "call", c) + (f", from the {nice_day(d['date'])} panic-dip alert" if d.get("date") else "")
+    pl = price_line(c, now_price)
+    tail = [pl] if pl else []
     if reason == "bounce":
-        return f"💰 CLOSE POSITION · {sym} call\nThe bounce happened. {sym} is {chg:+.1f}% since the buy alert."
-    return f"⏰ CLOSE POSITION · {sym} call\nNo bounce after {DIP_MAX_DAYS} days ({sym} {chg:+.1f}%). Get out before it loses more."
+        return "\n".join([f"💰 CLOSE POSITION · {head}",
+                          f"The bounce happened. {sym} is {chg:+.1f}% since the buy alert (${entry_price:.2f} → ${price:.2f})."]
+                         + tail + ["Sell it now to lock in the gain."])
+    return "\n".join([f"⏰ CLOSE POSITION · {head}",
+                      f"No bounce after {DIP_MAX_DAYS} days ({sym} {chg:+.1f}%). Get out before it loses more."] + tail)
 
 
 # ---------- News roundups ----------
@@ -1580,7 +1629,8 @@ def check_dips(mkt, watch, state, today, say):
                 why = dip_exit(closes, n)
                 print(f"{sym}: open dip from {d['date']}, {n} days, exit={why}")
                 if why:
-                    say(build_dip_exit(sym, price, d["price"], why))
+                    c = d.get("contract")
+                    say(build_dip_exit(sym, price, d["price"], why, d, option_bid(mkt, sym, "call", c) if c else None))
                     del open_dips[sym]
                 continue
             sig = dip_signal(closes, vix)
@@ -1590,6 +1640,9 @@ def check_dips(mkt, watch, state, today, say):
                 if good_pick(pick):
                     say(build_dip_alert(sym, price, sig, vix, pick))
                     open_dips[sym] = dict(date=today.isoformat(), price=price)
+                    if pick and not pick.get("too_pricey"):
+                        open_dips[sym]["contract"] = dict(strike=pick["strike"], expiry=pick["expiry"],
+                                                          premium=pick["premium"])
                 else:
                     print(f"{sym}: panic dip, but no option under budget with a real chance: skip")
         except Exception as e:
