@@ -1377,6 +1377,23 @@ def main():
         save_state(state)
         return
 
+    if FORCE == "quote":  # print SPY now + cheap puts/calls for today and the next expiries (log only)
+        bars = mkt.intraday("SPY")
+        d = mkt.daily("SPY")
+        print(f"SPY now {bars[-1]['close']:.2f}, open {bars[0]['open']:.2f}, high {max(b['high'] for b in bars):.2f},"
+              f" low {min(b['low'] for b in bars):.2f}, prev close {d[-2][1]:.2f}")
+        v = mkt.daily("^VIX")
+        print(f"VIX {v[-1][1]:.2f} (prev {v[-2][1]:.2f})")
+        for exp in mkt.expiries("SPY")[:3]:
+            calls, puts = mkt.chain("SPY", exp)
+            for kind, rows in (("put", puts), ("call", calls)):
+                for r in rows:
+                    ask = r.get("ask") or 0
+                    if 0.03 <= ask <= 0.9:
+                        print(f"{exp} {kind} {r['strike']}: bid {r.get('bid')} ask {ask} vol {r.get('volume')}"
+                              f" iv {r.get('impliedVolatility')}")
+        return
+
     if FORCE == "guide":
         send(GUIDE, chat_id, state)
         save_state(state)
