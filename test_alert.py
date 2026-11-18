@@ -256,8 +256,13 @@ def test_patterns_double_top_sell():
     assert "Sensei" in msg and "EUR/USD" in msg
 
 
-def test_watches_pullback_and_breakdown():
+def test_watches_pullback_and_breakdown(monkeypatch):
     import watches
+    monkeypatch.setattr(watches, "WATCHES", [
+        dict(id="2026-11-17-pullback-sell", side="SELL", start="2026-11-17T13:45", expires="2026-11-17T16:00",
+             kind="pullback", zone=(3863.0, 3866.0), stop=3872.0, targets=(3848.0, 3840.0), name="Pullback sell", how="x"),
+        dict(id="2026-11-17-breakdown-sell", side="SELL", start="2026-11-17T13:45", expires="2026-11-17T16:00",
+             kind="close_below", level=3838.0, stop=3848.0, targets=(3825.0,), name="Breakdown sell", how="y")])
     t = _dt(2026, 11, 17, 13, 45, tzinfo=_NY)
     bars = _bars15([(3855, 3858, 3853, 3857), (3857, 3864, 3856, 3862.5), (3862, 3863, 3850, 3851)], start=t)
     now = t + _td(minutes=46)
