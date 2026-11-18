@@ -283,3 +283,15 @@ def test_buy_price_uses_ask_and_skips_fake_quotes():
     assert ob.buy_price(dict(bid=0.25, ask=1.40, lastPrice=0.8)) == 1.40
     assert not ob.tradable(dict(bid=0.25, ask=1.40))   # gap too wide: the mid ($0.82) isn't a real price
     assert ob.tradable(dict(bid=1.30, ask=1.40))
+
+
+def test_close_alerts_name_the_contract():
+    d = dict(date="2026-11-16", price=257.75, contract=dict(strike=260, expiry="2026-12-04", premium=7.90))
+    t = ob.build_dip_exit("AMZN", 266.39, 257.75, "bounce", d, 12.55)
+    assert t.startswith("💰 CLOSE POSITION · AMZN $260 call (exp Dec 4), from the Nov 16 panic-dip alert")
+    assert "Bought about $7.90, now about $12.55 (+$465 per contract)" in t
+    old = ob.build_dip_exit("AMZN", 266.39, 257.75, "bounce", dict(date="2026-11-16", price=257.75))
+    assert "AMZN call, from the Nov 16 panic-dip alert" in old
+    dd = dict(sym="SPY", side="put", contract=dict(strike=730, expiry="2026-11-20", premium=2.5))
+    t2 = ob.build_daily_close(dd, 2.0)
+    assert "SPY $730 put (exp Nov 20), from today's SPY daily setup" in t2 and "-$50 per contract" in t2
