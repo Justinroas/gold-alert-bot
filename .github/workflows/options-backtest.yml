@@ -6,7 +6,7 @@ on:
       script:
         description: "Which replay"
         type: choice
-        options: ["breakout", "daily", "lotto"]
+        options: ["breakout", "daily", "lotto", "spread"]
         default: "breakout"
       tickers:
         description: "Comma-separated tickers to compare (empty = detailed SPY report)"
@@ -22,6 +22,6 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r options/requirements.txt
-      - run: python options/${{ inputs.script == 'daily' && 'backtest_daily.py' || inputs.script == 'lotto' && 'backtest_lotto.py' || 'backtest_spy.py' }}
+      - run: python options/${{ inputs.script == 'daily' && 'backtest_daily.py' || inputs.script == 'lotto' && 'backtest_lotto.py' || inputs.script == 'spread' && 'backtest_spread.py' || 'backtest_spy.py' }}
         env:
           TICKERS: ${{ inputs.tickers }}

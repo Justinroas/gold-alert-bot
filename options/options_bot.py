@@ -499,6 +499,8 @@ def contract_name(sym, side, c):
     """'AMZN $260 call (exp Dec 4)' when we know the contract, else 'AMZN call'."""
     if c and c.get("strike") and c.get("expiry"):
         exp = datetime.strptime(c["expiry"], "%Y-%m-%d").date()
+        if c.get("strike2"):
+            return f"{sym} {short_money(c['strike'])}/{short_money(c['strike2'])} call spread (exp {exp.strftime('%b')} {exp.day})"
         return f"{sym} {short_money(c['strike'])} {side} (exp {exp.strftime('%b')} {exp.day})"
     return f"{sym} {side}"
 
@@ -655,6 +657,75 @@ def build_dip_alert(sym, price, sig, vix, pick, budget=BUDGET):
                           f" or buy a share or two of {sym} instead if you want in.",
                           f"Close position: {sell}"])
     return signal_text("call", sym, why, pick, sell)
+
+
+# ---------- Small budget: the panic dip as a call spread (about $100) ----------
+# Replay (options/backtest_spread.py, 10 years, estimated prices): buy the call at the money, sell one a few
+# dollars higher, ~3 weeks out, same entry/exit as the panic dip.
+# SPY 47 trades 77% won (avg +$11), QQQ 37 trades 70% (+$15), IWM 27 trades 70% (+$8). Both halves held up.
+# Single stocks were mixed (small samples), so only these three.
+SPREAD_SYMS = ("SPY", "QQQ", "IWM")
+SPREAD_WIN = {"SPY": 77, "QQQ": 70, "IWM": 70}
+SPREAD_DAYS = (14, 35)
+
+
+def spread_pick(mkt, sym, price, today, budget=BUDGET):
+    """Call spread ~3 weeks out: buy the call at the money, sell the widest higher call that keeps the cost
+    (paying the ask, selling at the bid) under the budget. None if nothing fits."""
+    exps = []
+    for exp in mkt.expiries(sym):
+        days = (datetime.strptime(exp, "%Y-%m-%d").date() - today).days
+        if SPREAD_DAYS[0] <= days <= SPREAD_DAYS[1]:
+            exps.append((abs(days - 21), exp))
+    for _, exp in sorted(exps)[:2]:
+        calls, _ = mkt.chain(sym, exp)
+        rows = sorted([r for r in calls if r.get("strike") and tradable(r, 0.25)], key=lambda r: r["strike"])
+        if not rows:
+            continue
+        buy = min(rows, key=lambda r: abs(r["strike"] - price))
+        best = None
+        for r in rows:
+            if r["strike"] <= buy["strike"]:
+                continue
+            cost = buy["ask"] - r["bid"]
+            if cost <= 0 or cost * 100 > budget:
+                break
+            best = dict(strike=buy["strike"], strike2=r["strike"], expiry=exp, premium=round(cost, 2),
+                        mid=round(premium_of(buy) - premium_of(r), 2))
+        if best:
+            return best
+    return None
+
+
+def build_spread_alert(sym, sig, vix, pick):
+    exp = datetime.strptime(pick["expiry"], "%Y-%m-%d").date()
+    k1, k2, cost = pick["strike"], pick["strike2"], pick["premium"]
+    width = k2 - k1
+    return "\n".join([
+        f"💵 SMALL BUDGET · {sym} call spread",
+        f"Why: the market dumped hard (RSI-2: {sig['rsi']:.0f}) and everyone's scared (VIX: {vix:.0f})."
+        f" This cheap version won {SPREAD_WIN.get(sym, 70)}% of the time in a 10-year replay.",
+        f"Buy: 1 {sym} {short_money(k1)}/{short_money(k2)} call spread, expires {exp.strftime('%b')} {exp.day}"
+        f" (buy the {short_money(k1)} call, sell the {short_money(k2)} call, as one order), about {short_money(cost * 100)}."
+        f" Set the limit price to ${pick.get('mid') or cost:.2f} first.",
+        f"Best case: +{short_money((width - cost) * 100)} if {sym} is above {short_money(k2)} at expiry."
+        f" Worst case: -{short_money(cost * 100)}.",
+        "Close position: I'll tell you (usually in about 3 days). Buy before 3:55pm today.",
+        "Risk: 🟢 Clear trade · needs spreads turned on in Robinhood",
+    ])
+
+
+def spread_value(mkt, sym, c):
+    """What the spread sells for now: bid of the call you own minus ask of the one you sold."""
+    try:
+        calls, _ = mkt.chain(sym, c["expiry"])
+        q = {r.get("strike"): r for r in calls}
+        a, b = q.get(c["strike"]), q.get(c["strike2"])
+        if a and b:
+            return max((a.get("bid") or 0) - (b.get("ask") or 0), 0)
+    except Exception as e:
+        print(f"{sym}: spread price check failed: {e}")
+    return None
 
 
 def build_dip_exit(sym, price, entry_price, reason, d=None, now_price=None):
@@ -1274,6 +1345,7 @@ This chat sends stock options trade ideas on SPY and big stocks (NVDA, TSLA, AAP
 ⚡ All day · Big move: a stock jumps or drops 3%+ and is holding it.
 📰 12pm + 3:30pm · Market news: the top headlines and why they matter to us.
 🩸 ~3:20pm · Panic dip: a strong stock got dumped while the market is scared. Usually bounces within days.
+💵 ~3:20pm · Small budget: same panic dip on SPY/QQQ/IWM, as a call spread for about $100 or less.
 
 📖 HOW TO READ AN ALERT
 📗 BUY CALL = bet the stock goes UP
@@ -1457,7 +1529,16 @@ def main():
         return
 
     if FORCE == "quote" and os.environ.get("MESSAGE", "").strip():  # "SYM YYYY-MM-DD STRIKE": one contract + stock history (log only)
-        sym, exp, k = os.environ["MESSAGE"].split()
+        parts = os.environ["MESSAGE"].split()
+        if parts[0] == "spread":  # "spread SPY": what the small-budget alert would pick right now
+            for sym in parts[1:]:
+                px = mkt.daily(sym)[-1][1]
+                sp = spread_pick(mkt, sym, px, now.date())
+                print(sym, px, sp)
+                if sp:
+                    print(build_spread_alert(sym, dict(rsi=5), 25, sp))
+            return
+        sym, exp, k = parts
         print("daily:", mkt.daily(sym)[-5:])
         calls, puts = mkt.chain(sym, exp)
         for r in calls:
@@ -1616,7 +1697,7 @@ def check_dips(mkt, watch, state, today, say):
     vix = vix_days[-1][1] if vix_days else None
     print(f"VIX now {vix}")
     open_dips = state.setdefault("dips", {})
-    for sym in watch:
+    for sym in list(watch) + [x for x in SPREAD_SYMS if x not in watch]:
         try:
             days = mkt.daily(sym)
             if days[-1][0] != today:
@@ -1630,7 +1711,10 @@ def check_dips(mkt, watch, state, today, say):
                 print(f"{sym}: open dip from {d['date']}, {n} days, exit={why}")
                 if why:
                     c = d.get("contract")
-                    say(build_dip_exit(sym, price, d["price"], why, d, option_bid(mkt, sym, "call", c) if c else None))
+                    now_p = None
+                    if c:
+                        now_p = spread_value(mkt, sym, c) if c.get("strike2") else option_bid(mkt, sym, "call", c)
+                    say(build_dip_exit(sym, price, d["price"], why, d, now_p))
                     del open_dips[sym]
                 continue
             sig = dip_signal(closes, vix)
@@ -1643,6 +1727,10 @@ def check_dips(mkt, watch, state, today, say):
                     if pick and not pick.get("too_pricey"):
                         open_dips[sym]["contract"] = dict(strike=pick["strike"], expiry=pick["expiry"],
                                                           premium=pick["premium"])
+                elif sym in SPREAD_SYMS and (sp := spread_pick(mkt, sym, price, today)):
+                    say(build_spread_alert(sym, sig, vix, sp))
+                    open_dips[sym] = dict(date=today.isoformat(), price=price, contract=dict(
+                        strike=sp["strike"], strike2=sp["strike2"], expiry=sp["expiry"], premium=sp["premium"]))
                 else:
                     print(f"{sym}: panic dip, but no option under budget with a real chance: skip")
         except Exception as e:
