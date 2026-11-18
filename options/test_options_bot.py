@@ -237,7 +237,7 @@ def test_daily_setup():
     class M:
         def expiries(self, s): return ["2026-11-18", "2026-11-20", "2026-11-27"]
         def chain(self, s, e):
-            calls = [dict(strike=k, bid=p - 0.05, ask=p + 0.05, lastPrice=p) for k, p in ((100, 4.1), (102, 3.0), (104, 2.2), (108, 0.9))]
+            calls = [dict(strike=k, bid=p - 0.05, ask=p, lastPrice=p) for k, p in ((100, 4.1), (102, 3.0), (104, 2.2), (108, 0.9))]
             return calls, []
     pick = ob.daily_pick(M(), "NVDA", "call", 101.0, now.date())
     assert pick["expiry"] == "2026-11-20" and pick["strike"] == 102 and abs(pick["premium"] - 3.0) < 0.01
@@ -276,3 +276,9 @@ def test_lotto():
     text = ob.build_lotto_alert(dict(side="call", stop=600.0), pick)
     assert text.startswith("🎰 LOTTERY TICKET · SPY CALL, expires TODAY") and "Buy: 10 SPY $603 calls" in text
     assert "($22 per contract, $220 total)" in text and "about $440" in text and "about $0.44 (2x)" in text and "by 3pm" in text
+
+
+def test_buy_price_uses_ask_and_skips_fake_quotes():
+    assert ob.buy_price(dict(bid=0.25, ask=1.40, lastPrice=0.8)) == 1.40
+    assert not ob.tradable(dict(bid=0.25, ask=1.40))   # gap too wide: the mid ($0.82) isn't a real price
+    assert ob.tradable(dict(bid=1.30, ask=1.40))

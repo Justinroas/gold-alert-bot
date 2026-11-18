@@ -121,6 +121,18 @@ def premium_of(row):
     return last
 
 
+def buy_price(row):
+    """What you'd actually pay: the ask. Falls back to the mid/last price when there's no ask."""
+    ask = row.get("ask") or 0
+    return ask if ask > 0 else premium_of(row)
+
+
+def tradable(row, max_spread=0.35):
+    """Has a real bid and the bid/ask gap isn't huge (a wide gap means the quoted price is fake)."""
+    bid, ask = row.get("bid") or 0, row.get("ask") or 0
+    return bid > 0 and ask > 0 and (ask - bid) / ask <= max_spread
+
+
 def pick_expiry(expiries, today, lo=21, hi=60, target=30):
     """Expiry about a month out: gives the trade time to work without paying for months."""
     ds = [(datetime.strptime(e, "%Y-%m-%d").date(), e) for e in expiries]
@@ -265,8 +277,8 @@ def budget_pick(mkt, sym, kind, price, today, budget=BUDGET):
         calls, puts = mkt.chain(sym, exp)
         years = days / 365
         for r in (calls if kind == "call" else puts):
-            p, k = premium_of(r), r.get("strike")
-            if not k or p < 0.05 or p * 100 > budget or not (r.get("bid") or 0) > 0:
+            p, k = buy_price(r), r.get("strike")
+            if not k or p < 0.05 or p * 100 > budget or not tradable(r):
                 continue
             iv = implied_vol(kind, p, price, k, years)
             if not iv:
@@ -444,11 +456,11 @@ def daily_pick(mkt, sym, kind, price, today, lo=DAILY_PREMIUM[0], hi=DAILY_PREMI
             continue
         calls, puts = mkt.chain(sym, exp)
         rows = [r for r in (calls if kind == "call" else puts)
-                if r.get("strike") and lo <= premium_of(r) <= hi and (r.get("bid") or 0) > 0]
+                if r.get("strike") and lo <= buy_price(r) <= hi and tradable(r)]
         if not rows:
             continue
         r = min(rows, key=lambda r: abs(r["strike"] - price))
-        p, k = premium_of(r), r["strike"]
+        p, k = buy_price(r), r["strike"]
         years = days / 365
         iv = implied_vol(kind, p, price, k, years) or 0.3
         be = k + p if kind == "call" else k - p
