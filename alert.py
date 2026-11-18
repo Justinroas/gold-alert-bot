@@ -195,10 +195,13 @@ def get_bars():
     return spot
 
 
+DISCLAIMER = "⚠️ Not financial advice. Trading involves risk, no profit is guaranteed, and we are not licensed advisors."
+
+
 def send_telegram(text, footer=True):
     r = requests.post(f"https://api.telegram.org/bot{os.environ['TELEGRAM_BOT_TOKEN']}/sendMessage",
                       data={"chat_id": os.environ["TELEGRAM_CHAT_ID"],
-                            "text": text + ("\n\nAlert only, not financial advice." if footer else ""),
+                            "text": text + ("\n\n" + DISCLAIMER if footer else ""),
                             "disable_web_page_preview": "true"}, timeout=30)
     r.raise_for_status()
 

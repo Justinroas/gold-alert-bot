@@ -1328,7 +1328,11 @@ def find_chat_id(state):
     return None
 
 
+DISCLAIMER = "⚠️ Not financial advice. Trading involves risk, no profit is guaranteed, and we are not licensed advisors."
+
+
 def send(text, chat_id, state=None):
+    text = text.rstrip() + "\n\n" + DISCLAIMER
     print(text + "\n" + "-" * 40)
     if DRY_RUN or not chat_id:
         return chat_id
